@@ -622,6 +622,7 @@ function openEntry(code, keepMsg){
   var it=byCode(code);
   if(!FORM || FORM.code!==code){
     FORM={code:code, date:'', lane:'', way:'', fac:'', at:'', cuts:[], entries:[],
+          editing:null, editQty:'', editLoc:'',
           site:(it.sites&&it.sites.length===1)?it.sites[0]:'',
           dir:it.lastDir||'NB', from:(it.lastTo!==null&&it.lastTo!==undefined)?it.lastTo:'',
           to:'', qty:'', loc:'', err:'', ok: keepMsg||''};
@@ -751,14 +752,33 @@ function openEntry(code, keepMsg){
     h+='<div class="grp" style="margin-top:16px">Already entered on this day  \u00b7  '+
        tot.toLocaleString(undefined,{maximumFractionDigits:2})+' '+esc(it.uom)+'</div>';
     h+='<div class="pts">';
-    FORM.entries.slice().reverse().forEach(function(e){
-      h+='<div class="pt" style="opacity:.72">'+
+    FORM.entries.slice().reverse().forEach(function(e,ri){
+      var idx=FORM.entries.length-1-ri;
+      var open = (FORM.editing===e.row);
+      h+='<div class="pt" style="opacity:'+(open?'1':'.72')+'" '+
+         (e.reported?'':'onclick="editRow('+e.row+')"')+'>'+
          '<div class="txt" style="flex:1;min-width:0">'+
          '<div style="font-weight:600">'+
          Number(e.qty).toLocaleString(undefined,{maximumFractionDigits:2})+' '+
          esc(e.uom||it.uom)+'</div>'+
          (e.loc?'<div style="font-size:12px;color:var(--grey)">'+esc(e.loc)+'</div>':'')+
-         '</div></div>';
+         '</div>'+
+         (e.reported ? '<div class="a" style="font-size:11px">reported</div>'
+                     : '<div class="x" style="font-size:14px">edit</div>')+
+         '</div>';
+      if(open){
+        h+='<div style="padding:12px 14px;border-bottom:1px solid var(--line)">'+
+           '<div class="fld"><label>Quantity ('+esc(e.uom||it.uom)+')</label>'+
+           '<input type="number" inputmode="decimal" step="0.01" value="'+esc(FORM.editQty)+'" '+
+           'oninput="FORM.editQty=this.value"></div>'+
+           '<div class="fld"><label>Where</label>'+
+           '<input type="text" value="'+esc(FORM.editLoc)+'" '+
+           'oninput="FORM.editLoc=this.value"></div>'+
+           '<button class="btn save" onclick="saveEdit('+e.row+')">Change it</button>'+
+           '<button class="btn ghost" onclick="removeRow('+e.row+')">Remove this entry</button>'+
+           '<button class="btn ghost" onclick="FORM.editing=null;openEntry(FORM.code)">'+
+           'Leave it</button></div>';
+      }
     });
     h+='</div>';
   }
@@ -808,6 +828,61 @@ function addCut(){
 function dropCut(i){
   FORM.cuts.splice(i,1);
   openEntry(FORM.code, FORM.ok);
+}
+
+/* An entry already on the tracker can be put right from here, so nobody has
+   to open the sheet to fix a typed figure. Anything already reported to the
+   ministry is left alone: a silent change would leave the two out of step. */
+
+function editRow(row){
+  var e=(FORM.entries||[]).filter(function(x){return x.row===row;})[0];
+  if(!e) return;
+  FORM.editing=row; FORM.editQty=String(e.qty); FORM.editLoc=e.loc||'';
+  openEntry(FORM.code, FORM.ok);
+}
+
+function saveEdit(row){
+  if(!(Number(FORM.editQty)>0)){ FORM.err='Enter a quantity.'; openEntry(FORM.code); return; }
+  var payload={code_:CODE, code:FORM.code, row:row,
+               qty:FORM.editQty, loc:FORM.editLoc};
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res.ok){ FORM.err=res.message; openEntry(FORM.code); return; }
+      if(res.item && res.item.code===FORM.code){
+        for(var i=0;i<DATA.items.length;i++)
+          if(DATA.items[i].code===FORM.code){ DATA.items[i]=res.item; break; }
+      }
+      FORM.editing=null; FORM.err='';
+      openEntry(FORM.code, 'Changed.');
+      loadEntries();
+    })
+    .withFailureHandler(function(){
+      enqueue('editEntry', payload, 'a correction');
+      FORM.editing=null;
+      openEntry(FORM.code, 'Correction held on this phone.');
+    })
+    .editEntry(payload);
+}
+
+function removeRow(row){
+  var payload={code_:CODE, code:FORM.code, row:row, remove:true};
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res.ok){ FORM.err=res.message; openEntry(FORM.code); return; }
+      if(res.item && res.item.code===FORM.code){
+        for(var i=0;i<DATA.items.length;i++)
+          if(DATA.items[i].code===FORM.code){ DATA.items[i]=res.item; break; }
+      }
+      FORM.editing=null; FORM.err='';
+      openEntry(FORM.code, 'Removed.');
+      loadEntries();
+    })
+    .withFailureHandler(function(){
+      enqueue('editEntry', payload, 'a removal');
+      FORM.editing=null;
+      openEntry(FORM.code, 'Removal held on this phone.');
+    })
+    .editEntry(payload);
 }
 
 function loadEntries(){
