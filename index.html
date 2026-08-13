@@ -574,7 +574,7 @@ function openEntry(code, keepMsg){
   SCREEN='entry'; CURRENT=code;
   var it=byCode(code);
   if(!FORM || FORM.code!==code){
-    FORM={code:code, date:'', lane:'', way:'', at:'', cuts:[], entries:[],
+    FORM={code:code, date:'', lane:'', way:'', fac:'', at:'', cuts:[], entries:[],
           site:(it.sites&&it.sites.length===1)?it.sites[0]:'',
           dir:it.lastDir||'NB', from:(it.lastTo!==null&&it.lastTo!==undefined)?it.lastTo:'',
           to:'', qty:'', loc:'', err:'', ok: keepMsg||''};
@@ -595,7 +595,8 @@ function openEntry(code, keepMsg){
      '<input type="date" id="f_date" value="'+esc(FORM.date)+'" onchange="fset(\'date\',this.value)"></div>';
 
   h+=siteField(it, FORM.site, 'fset');
-  // barrier, curb and outfall run along the edge: a direction, but no lane
+  if(it.entry==='m' && (it.code==='04.07.02'||it.code==='04.07.01'))
+    h+=laneField(FORM.lane,'fset');
 
   // anything laid along the road needs a direction; only the counts do not
   // anything laid along the road needs a direction; only the counts do not
@@ -638,20 +639,25 @@ function openEntry(code, keepMsg){
     h+='<div class="fld"><label>Where</label>'+
        '<input type="text" id="f_loc" value="'+esc(FORM.loc)+'" '+
        'placeholder="Brodie intersection" oninput="fset(\'loc\',this.value)"></div>';
+    h+=laneField(FORM.lane,'fset');
     h+='<div class="fld"><label>Measured</label><div class="seg">'+
        '<button class="'+(FORM.way==='W'?'on':'')+'" onclick="fset(\'way\',\'W\')">'+
-       'Width \u00d7 5.0</button>'+
+       'Width</button>'+
        '<button class="'+(FORM.way==='L'?'on':'')+'" onclick="fset(\'way\',\'L\')">'+
-       'Length \u00d7 4.2</button></div></div>';
-    h+='<div class="fld"><label>How many metres</label>'+
+       'Length</button></div></div>';
+    h+='<div class="two">'+
+       '<div class="fld"><label>How many metres</label>'+
        '<input type="number" inputmode="decimal" step="0.01" id="f_qty" value="'+esc(FORM.qty)+'" '+
-       'placeholder="0.00" oninput="fset(\'qty\',this.value)"></div>';
+       'placeholder="0.00" oninput="fset(\'qty\',this.value)"></div>'+
+       '<div class="fld"><label>Times (m)</label>'+
+       '<input type="number" inputmode="decimal" step="0.01" id="f_fac" value="'+esc(FORM.fac)+'" '+
+       'placeholder="'+(FORM.way==='L'?'2.2':'5.0')+'" '+
+       'oninput="fset(\'fac\',this.value)"></div></div>';
     var cutOk = FORM.way && Number(FORM.qty)>0;
     h+= cutOk
       ? '<button class="btn go" onclick="addCut()">Add '+
-        (Math.round(Number(FORM.qty)*(FORM.way==='W'?5.0:4.2)*100)/100).toLocaleString()+' m²'+
-        '<span class="sub">'+esc(FORM.qty)+' m '+
-        (FORM.way==='W'?'wide × 5.0':'long × 4.2')+'</span></button>'
+        (Math.round(Number(FORM.qty)*cutFactor()*100)/100).toLocaleString()+' m²'+
+        '<span class="sub">'+esc(FORM.qty)+' × '+cutFactor()+' m</span></button>'
       : '<button class="btn off">Add this measurement</button>';
     if((FORM.cuts||[]).length){
       var ctot=FORM.cuts.reduce(function(a,c){return a+c.area;},0);
@@ -663,8 +669,7 @@ function openEntry(code, keepMsg){
         h+='<div class="pt"><div class="n">'+(idx+1)+'</div>'+
            '<div class="txt" style="flex:1;min-width:0">'+
            '<div style="font-weight:600">'+c.m+' m '+(c.way==='W'?'wide':'long')+'</div>'+
-           '<div style="font-size:12px;color:var(--grey)">\u00d7 '+
-           (c.way==='W'?'5.0':'4.2')+'</div></div>'+
+           '<div style="font-size:12px;color:var(--grey)">\u00d7 '+c.fac+' m</div></div>'+
            '<div class="a">'+c.area.toLocaleString()+' m²</div>'+
            '<div class="x" onclick="dropCut('+idx+')">&times;</div></div>';
       });
@@ -713,7 +718,7 @@ function openEntry(code, keepMsg){
   h+='<button class="btn" onclick="submitEntry()">Save entry</button>';
   h+='<button class="btn ghost" onclick="FORM=null;openItem(\''+code+'\')">Cancel</button>';
   document.getElementById('view').innerHTML=h;
-  armCamera(code, FORM.date, FORM.site, FORM.dir, FORM.lane);
+  armCamera(code, FORM.date, FORM.site, FORM.dir, FORM.lane, entryWhere());
 
 }
 
@@ -721,10 +726,12 @@ function fset(k,v){
   FORM[k]=v; FORM.err='';
   // the tie-in preview lives in the page, so it has to be redrawn as you choose
   if(k==='date'||k==='site') loadEntries();
-  var redraw = (k==='dir'||k==='from'||k==='to'||k==='way'||k==='qty'||k==='at');
+  PHOTO.where=entryWhere();
+  var redraw = (k==='dir'||k==='from'||k==='to'||k==='way'||k==='qty'||k==='at'||
+                k==='fac'||k==='lane');
   if(!redraw) return;
   var focus = (k==='from')?'f_from':(k==='to')?'f_to':(k==='qty')?'f_qty':
-              (k==='at')?'f_at':null;
+              (k==='at')?'f_at':(k==='fac')?'f_fac':null;
   var pos = null;
   if(focus){ var el=document.getElementById(focus); pos = el?el.selectionStart:null; }
   openEntry(FORM.code, FORM.ok);
@@ -735,10 +742,18 @@ function fset(k,v){
 }
 
 /** What is already on the sheet for this item, day and site. */
+/** What the grinder usually cuts, unless the person measured otherwise. */
+function cutFactor(){
+  var f=Number(FORM.fac);
+  if(isFinite(f)&&f>0) return f;
+  return FORM.way==='L' ? 2.2 : 5.0;
+}
+
 function addCut(){
   if(!FORM.way || !(Number(FORM.qty)>0)) return;
-  var m=Number(FORM.qty), fac=FORM.way==='W'?5.0:4.2;
-  FORM.cuts=(FORM.cuts||[]).concat([{m:m, way:FORM.way, area:Math.round(m*fac*100)/100}]);
+  var m=Number(FORM.qty), fac=cutFactor();
+  FORM.cuts=(FORM.cuts||[]).concat([{m:m, way:FORM.way, fac:fac,
+                                     area:Math.round(m*fac*100)/100}]);
   FORM.qty='';
   openEntry(FORM.code, FORM.ok);
 }
@@ -806,7 +821,7 @@ function submitEntry(){
       openEntry(FORM.code, 'Held on this phone \u2014 it will be sent when there is signal.');
     })
     .postEntry(epayload={code_:CODE, code:FORM.code, date:FORM.date, site:FORM.site, dir:FORM.dir,
-                lane:FORM.lane, way:FORM.way, at:FORM.at, cuts:FORM.cuts,
+                lane:FORM.lane, way:FORM.way, fac:FORM.fac, at:FORM.at, cuts:FORM.cuts,
                 from:FORM.from, to:FORM.to, qty:FORM.qty, loc:FORM.loc});
 }
 
@@ -981,7 +996,7 @@ function openArea(code, keepMsg){
   h+='<button class="btn ghost" onclick="AREA=null;openItem(\''+code+'\')">Done</button>';
   document.getElementById('view').innerHTML=h;
   stickBelowBar();
-  armCamera(code, AREA.date, AREA.site, AREA.dir, AREA.lane);
+  armCamera(code, AREA.date, AREA.site, AREA.dir, AREA.lane, areaWhere());
 }
 
 var dateTimer=null;
@@ -1051,6 +1066,7 @@ function afield(k,v){
   var b=document.getElementById('a_btn');  if(b) b.innerHTML=buttonHtml();
   if(k==='tonnes'||k==='segT'||k==='at'||k==='atw'||
      k==='endT'||k==='endAt'||k==='endW') keepDraft();
+  if(k==='s1'||k==='s2'||k==='dnote') PHOTO.where=areaWhere();
   refreshBar();
 }
 
@@ -1120,7 +1136,7 @@ function toggleCtx(){ AREA.showCtx=!AREA.showCtx; openArea(AREA.code, AREA.ok); 
    The camera sits in the header so it costs no room on the screen. It appears
    once a date and job site are chosen, because that is what files the photo. */
 
-var PHOTO = {code:'', date:'', site:'', dir:'', lane:'', n:0, busy:false};
+var PHOTO = {code:'', date:'', site:'', dir:'', lane:'', where:'', n:0, busy:false};
 
 function showCam(on, it){
   var el=document.getElementById('cam');
@@ -1131,9 +1147,10 @@ function showCam(on, it){
   if(n) n.textContent = PHOTO.busy ? '…' : (PHOTO.n ? String(PHOTO.n) : '');
 }
 
-function armCamera(code, date, site, dir, lane){
+function armCamera(code, date, site, dir, lane, where){
   var changed = (PHOTO.code!==code||PHOTO.date!==date||PHOTO.site!==site);
   PHOTO.code=code; PHOTO.date=date; PHOTO.site=site; PHOTO.dir=dir||''; PHOTO.lane=lane||'';
+  PHOTO.where=where||'';
   var on = !!(code && date && site);
   if(changed && on){
     PHOTO.n=0;
@@ -1192,7 +1209,7 @@ function sendPhoto(data){
       PHOTO.n++; showCam(true);
     })
     .postPhoto(ppayload={code_:CODE, code:PHOTO.code, date:PHOTO.date, site:PHOTO.site,
-                dir:PHOTO.dir, lane:PHOTO.lane, data:data});
+                dir:PHOTO.dir, lane:PHOTO.lane, note:PHOTO.where, data:data});
 }
 
 function stickBelowBar(){
@@ -1523,6 +1540,27 @@ function loadDay(){
 }
 
 /** The day, the place and the lane in one line. */
+/** What the person is looking at, so a photograph says where it was taken. */
+function areaWhere(){
+  if(AREA.mode==='desc' && AREA.dnote) return String(AREA.dnote).trim();
+  if(AREA.s1!=='' && AREA.s2!=='') return staTxt(Number(AREA.s1))+' to '+staTxt(Number(AREA.s2));
+  if(AREA.s1!=='') return 'at '+staTxt(Number(AREA.s1));
+  var cur=(AREA.segs||[]).filter(function(g){return g.kind!=='desc';});
+  if(cur.length) return 'at '+staTxt(cur[cur.length-1].s2);
+  return '';
+}
+
+function entryWhere(){
+  if(!FORM) return '';
+  if(FORM.at!=='' && FORM.at!==undefined && isFinite(Number(FORM.at)))
+    return 'at '+staTxt(Number(FORM.at));
+  if(FORM.from!=='' && FORM.to!=='')
+    return staTxt(Number(FORM.from))+' to '+staTxt(Number(FORM.to));
+  if(FORM.from!=='') return 'at '+staTxt(Number(FORM.from));
+  if(FORM.loc) return String(FORM.loc).trim();
+  return '';
+}
+
 function ctxLine(){
   var bits=[];
   if(AREA.date){
