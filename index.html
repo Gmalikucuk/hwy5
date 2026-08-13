@@ -41,6 +41,13 @@
     font-family:inherit;color:var(--navy);background:var(--card);
     border:1px solid var(--line);border-radius:12px}
   .lock input:focus{outline:0;border-color:var(--navy)}
+  .tk{display:flex;align-items:center;gap:10px;padding:13px 14px;background:var(--card);
+    border:1px solid var(--line);border-radius:12px;margin-top:14px;cursor:pointer}
+  .tk svg{width:22px;height:22px;fill:var(--navy);opacity:.85;flex-shrink:0}
+  .tk .t{flex:1;min-width:0}
+  .tk .t b{display:block;font-size:15px;color:var(--navy)}
+  .tk .t span{font-size:12px;color:var(--grey)}
+  .tk .arrow{color:#c9c9c9;font-size:18px}
   #qbar{display:none;background:#fdf0d5;color:#8a5200;padding:9px 14px;font-size:13px;
     border-bottom:1px solid #f0dfb8}
   :root{--amber:#b26a00}
@@ -497,6 +504,13 @@ function renderHome(){
         h+=rowHtml(x,"openItem('"+x.code+"')");
       });
     });
+    h+='<div class="tk" onclick="TRUCK=null;openTrucks()">'+
+       '<svg viewBox="0 0 24 24"><path d="M3 6a1 1 0 011-1h9a1 1 0 011 1v2h2.6a1 1 0 01.8.4'+
+       'l2.4 3.2a1 1 0 01.2.6V16a1 1 0 01-1 1h-1.1a2.5 2.5 0 01-4.8 0H9.9a2.5 2.5 0 01-4.8 0'+
+       'H4a1 1 0 01-1-1V6zm11 4v3h5v-.5L17.1 10H14zM7.5 16.5a1 1 0 102 0 1 1 0 00-2 0zm7 0'+
+       'a1 1 0 102 0 1 1 0 00-2 0z"/></svg>'+
+       '<div class="t"><b>Trucks</b><span>photograph an arrival from the plant</span></div>'+
+       '<div class="arrow">\u203A</div></div>';
     h+='<div class="muted" style="text-align:center;margin-top:16px">'+
        'Updated '+esc(DATA.fetched)+'</div>';
     h+='<button class="btn ghost" onclick="refresh()">Refresh</button>';
@@ -861,6 +875,109 @@ function submitEntry(){
 /* ------------------------------------------------------- area measuring */
 var AREA = null;
 
+/* ------------------------------------------------------------------ trucks
+   Not an item, so it hangs off the home screen: the plant delivers to the job
+   rather than to any one line of the contract.                              */
+
+var TRUCK = null;
+
+function openTrucks(){
+  SCREEN='trucks';
+  if(!TRUCK) TRUCK={date:'', site:'', truck:'', note:'', today:[], busy:false, err:'', ok:''};
+  document.getElementById('back').style.display='block';
+  document.getElementById('back').onclick=function(){ TRUCK=null; renderHome(); };
+  document.getElementById('title').textContent='Trucks';
+  var a=document.getElementById('act'); a.textContent=''; a.onclick=null;
+
+  var h='';
+  if(TRUCK.ok) h+='<div class="ok">'+esc(TRUCK.ok)+'</div>';
+  if(TRUCK.err) h+='<div class="err">'+esc(TRUCK.err)+'</div>';
+
+  h+='<div class="fld"><label>Date</label><input type="date" value="'+esc(TRUCK.date)+'" '+
+     'onchange="tset(\'date\',this.value)"></div>';
+  h+='<div class="fld"><label>Job site</label>'+
+     '<select onchange="tset(\'site\',this.value)"><option value="">Choose…</option>';
+  DATA.sites.forEach(function(sv){
+    h+='<option value="'+esc(sv)+'"'+(TRUCK.site===sv?' selected':'')+'>'+esc(sv)+'</option>';
+  });
+  h+='</select></div>';
+
+  if(TRUCK.date && TRUCK.site){
+    h+='<div class="fld"><label>Truck number</label>'+
+       '<input type="text" id="t_no" value="'+esc(TRUCK.truck)+'" '+
+       'placeholder="as it is on the truck" oninput="tfield(\'truck\',this.value)"></div>';
+    h+='<div class="fld"><label>Note (optional)</label>'+
+       '<input type="text" value="'+esc(TRUCK.note)+'" '+
+       'placeholder="anything worth saying" oninput="tfield(\'note\',this.value)"></div>';
+    h+= TRUCK.truck.trim()
+      ? '<button class="btn go" onclick="truckPhoto()">'+
+        (TRUCK.busy?'Recording…':'Photograph and record arrival')+'</button>'
+      : '<button class="btn off">Photograph and record arrival</button>';
+    h+='<div class="note" style="margin-top:8px">The time of arrival is taken '+
+       'when the photograph is saved.</div>';
+  }
+
+  if((TRUCK.today||[]).length){
+    h+='<div class="grp" style="margin-top:18px">Arrived today  \u00b7  '+
+       TRUCK.today.length+'</div><div class="pts">';
+    TRUCK.today.forEach(function(t){
+      h+='<div class="pt"><div class="txt" style="flex:1;min-width:0">'+
+         '<div style="font-weight:600">'+esc(t.truck)+'</div>'+
+         (t.note?'<div style="font-size:12px;color:var(--grey)">'+esc(t.note)+'</div>':'')+
+         '</div><div class="a">'+esc(t.at)+'</div></div>';
+    });
+    h+='</div>';
+  }
+  h+='<button class="btn ghost" onclick="TRUCK=null;renderHome()">Done</button>';
+  document.getElementById('view').innerHTML=h;
+  armCamera('', '', '');
+}
+
+function tset(k,v){ TRUCK[k]=v; TRUCK.err=''; openTrucks(); if(k==='date'||k==='site') loadTrucks(); }
+function tfield(k,v){
+  TRUCK[k]=v;
+  // only the button changes as the number is typed, so the keyboard stays up
+  if(k==='truck') openTrucks();
+}
+
+function loadTrucks(){
+  if(!TRUCK||!TRUCK.date||!TRUCK.site) return;
+  var d=TRUCK.date, st=TRUCK.site;
+  google.script.run.withSuccessHandler(function(list){
+    if(!TRUCK||TRUCK.date!==d||TRUCK.site!==st) return;
+    TRUCK.today=list||[]; openTrucks();
+  }).withFailureHandler(function(){}).trucksToday(d, st, CODE);
+}
+
+function truckPhoto(){
+  if(TRUCK.busy || !TRUCK.truck.trim()) return;
+  var el=document.getElementById('camIn');
+  if(!el) return;
+  el.value=''; el.setAttribute('data-for','truck'); el.click();
+}
+
+function sendTruck(data){
+  TRUCK.busy=true; openTrucks();
+  var payload={code_:CODE, date:TRUCK.date, site:TRUCK.site, truck:TRUCK.truck.trim(),
+               item:'', note:TRUCK.note, data:data};
+  google.script.run
+    .withSuccessHandler(function(res){
+      TRUCK.busy=false;
+      if(!res.ok){ TRUCK.err=res.message; openTrucks(); return; }
+      TRUCK.ok='Truck '+res.truck+' recorded at '+res.at;
+      TRUCK.truck=''; TRUCK.note=''; TRUCK.err='';
+      openTrucks(); loadTrucks();
+    })
+    .withFailureHandler(function(){
+      TRUCK.busy=false;
+      enqueue('postTruck', payload, 'truck '+payload.truck);
+      TRUCK.ok='Truck '+payload.truck+' held on this phone.';
+      TRUCK.truck=''; TRUCK.note='';
+      openTrucks();
+    })
+    .postTruck(payload);
+}
+
 function openArea(code, keepMsg){
   SCREEN='area'; CURRENT=code;
   var it=byCode(code);
@@ -1204,7 +1321,9 @@ function takePhoto(){
 function photoPicked(input){
   var file = input.files && input.files[0];
   if(!file) return;
-  PHOTO.busy=true; showCam(true);
+  var forTruck = input.getAttribute && input.getAttribute('data-for')==='truck';
+  if(input.setAttribute) input.setAttribute('data-for','');
+  if(!forTruck){ PHOTO.busy=true; showCam(true); }
   var reader=new FileReader();
   reader.onload=function(ev){
     var img=new Image();
@@ -1213,7 +1332,8 @@ function photoPicked(input){
       if(w>max||h>max){ var k=Math.min(max/w,max/h); w=Math.round(w*k); h=Math.round(h*k); }
       var cv=document.createElement('canvas'); cv.width=w; cv.height=h;
       cv.getContext('2d').drawImage(img,0,0,w,h);
-      sendPhoto(cv.toDataURL('image/jpeg',0.72));
+      var out = cv.toDataURL('image/jpeg',0.72);
+      if(forTruck) sendTruck(out); else sendPhoto(out);
     };
     img.onerror=function(){ PHOTO.busy=false; showCam(true); };
     img.src=ev.target.result;
