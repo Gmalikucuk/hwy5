@@ -391,6 +391,35 @@ function draftCount(code){
   return d && d.segs ? d.segs.length : 0;
 }
 
+/**
+ * Whether this browser will actually keep anything.
+ *
+ * Safari refuses storage to a page inside a cross-origin frame, which is how
+ * Apps Script serves it. Nothing then persists: not the chosen items, not the
+ * passcode, and — the part that matters — not the queue of work waiting to be
+ * sent. Better to say so than to lose entries quietly.
+ */
+var STORAGE_OK = (function(){
+  try{
+    localStorage.setItem('hwy5.test','1');
+    var ok = localStorage.getItem('hwy5.test')==='1';
+    localStorage.removeItem('hwy5.test');
+    return ok;
+  }catch(e){ return false; }
+})();
+
+function warnIfNoStorage(){
+  if(STORAGE_OK) return;
+  var el=document.getElementById('qbar');
+  if(!el) return;
+  el.style.display='block';
+  el.style.background='#fdecea';
+  el.style.color='#a4231c';
+  el.innerHTML='<b>This phone is not keeping anything.</b> Chosen items and any '+
+    'work saved out of signal will be lost when the page reloads. Open the app '+
+    'from its own address rather than through Google.';
+}
+
 function loadPins(){
   try{
     var raw = localStorage.getItem(KEY);
