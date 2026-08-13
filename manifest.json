@@ -1,0 +1,16 @@
+{
+  "name": "Hwy 5 Progress",
+  "short_name": "Hwy 5",
+  "description": "Keywest Asphalt \u00b7 Contract 26607-0000",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f5f3",
+  "theme_color": "#1f3864",
+  "icons": [
+    { "src": "/icon180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/icon512.png", "sizes": "512x512", "type": "image/png",
+      "purpose": "any maskable" }
+  ]
+}
