@@ -1218,7 +1218,9 @@ function coverHtml(code){
     '<div class="lab">What is left will cover</div>'+
     '<div class="val">'+c.reach.toLocaleString()+'<small> m²</small></div>'+
     '<div class="sub">'+Math.round(c.left).toLocaleString()+' t remaining at '+
-    c.rate.toFixed(1)+' kg/m², the rate run so far</div></div>';
+    c.rate.toFixed(1)+' kg/m², the rate run so far'+
+    (c.perLift?'<br>area of lift laid, not length of road \u2014 this line paves '+
+      'the same ground more than once':'')+'</div></div>';
 }
 
 function openArea(code, keepMsg){
@@ -2121,9 +2123,12 @@ function segPreview(){
   var area=Math.round((w1+w2)/2*len*100)/100;
   var note=staTxt(s1)+' to '+staTxt(s2)+' · '+len.toLocaleString()+' m · avg '+
            ((w1+w2)/2).toFixed(2)+' m';
-  if(overlaps(s1,s2) && !AREA.allowOverlap)
+  var itr=byCode(AREA.code);
+  if(overlaps(s1,s2) && !AREA.allowOverlap && !(itr && itr.repeats))
     return {ok:false, why:'Already covered today in this lane', clash:true,
             area:area.toLocaleString(undefined,{maximumFractionDigits:1})+' m²'};
+  if(overlaps(s1,s2) && itr && itr.repeats)
+    note += '  ·  another run over the same ground';
   return {ok:true, area:area.toLocaleString(undefined,{maximumFractionDigits:1})+' m²',
           note:note};
 }
