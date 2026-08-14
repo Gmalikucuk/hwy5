@@ -1387,6 +1387,7 @@ function openArea(code, keepMsg){
          '<div class="fld"><label>Width there (m)</label>'+
          '<input type="number" inputmode="decimal" step="0.01" value="'+esc(AREA.endW)+'" '+
          'placeholder="m" oninput="afield(\'endW\',this.value)"></div></div>';
+      h+='<div id="a_end">'+endRateHtml(it)+'</div>';
       h+='<button class="btn" onclick="finishDay()">Close the day'+
          (AREA.endT!=='' ? ' at '+Number(AREA.endT).toLocaleString()+' t' : '')+
          '</button>';
@@ -1464,6 +1465,8 @@ function afield(k,v){
   var c=document.getElementById('a_clash'); if(c) c.innerHTML=clashHtml();
   var g=document.getElementById('a_seg');
   if(g){ var itg=byCode(AREA.code); if(itg) g.innerHTML=segRateHtml(itg); }
+  var e2=document.getElementById('a_end');
+  if(e2){ var ite=byCode(AREA.code); if(ite) e2.innerHTML=endRateHtml(ite); }
   var b=document.getElementById('a_btn');  if(b) b.innerHTML=buttonHtml();
   if(k==='tonnes'||k==='segT'||k==='at'||k==='atw'||
      k==='endT'||k==='endAt'||k==='endW') keepDraft();
@@ -1867,6 +1870,35 @@ function rateLine(prefix, station, area, tonnes, rate, designRate){
  * What closing the day would do to the measurements, worked out here so it can
  * be shown before anything is changed. Mirrors settleChain_ on the server.
  */
+/**
+ * What the day comes to as the tonnage is typed — before anything is committed.
+ * Waiting until the confirmation card is too late to be useful: the figure is
+ * what tells the crew whether the tonnage they have is the tonnage they meant.
+ */
+function endRateHtml(it){
+  var t=Number(AREA.endT);
+  if(!(t>0)) return '';
+  var sp=settlePreview();
+  var area=sp.area;
+  if(!(area>0)) return '';
+  var rate=t*1000/area;
+  var pct=DATA.designRate ? rate/DATA.designRate : null;
+  var lo=DATA.bandLow||0.96, hi=DATA.bandHigh||1.04;
+  var out = pct!==null && (pct<lo || pct>hi);
+  var big = (pct!==null) ? (pct*100).toFixed(1)+'<small> %</small>'
+                         : rate.toFixed(1)+'<small> kg/m²</small>';
+  return '<div class="calc" style="'+(out?'background:#fdecea':'')+'">'+
+    '<div class="lab">The day would close at</div>'+
+    '<div class="val'+(out?' r':'')+'">'+big+'</div>'+
+    '<div class="sub">'+rate.toFixed(1)+' kg/m²  ·  '+
+    Math.round(area).toLocaleString()+' m²  ·  '+
+    t.toLocaleString(undefined,{maximumFractionDigits:1})+' t'+
+    (sp.added?'  ·  including the run to the cut-off':'')+
+    (sp.trimmed||sp.removed?'  ·  after taking back past the cut-off':'')+
+    (out?'  ·  outside '+(lo*100).toFixed(0)+'\u2013'+(hi*100).toFixed(0)+'%':'')+
+    '</div></div>';
+}
+
 /** Spelled out in full, because closing the day rewrites saved measurements. */
 function confirmHtml(it){
   var sp=settlePreview();
