@@ -1238,7 +1238,7 @@ function openArea(code, keepMsg){
          site:(it.sites&&it.sites.length===1)?it.sites[0]:'',
          dir:it.lastDir||'NB', lane:'', segs:[], mode:'sta',
          s1:'', w1:'', s2:'', w2:'', darea:'', dnote:'',
-         tonnes:'', segT:'', mm:'', at:'', atw:'', confirming:false,
+         tonnes:'', segT:'', at:'', atw:'', confirming:false,
          endT:'', endAt:'', endW:'', closed:null, closedArea:0,
          dayArea:0, dayTonnes:0, daySegs:[], err:'', ok:''};
   }
@@ -1265,14 +1265,6 @@ function openArea(code, keepMsg){
        '<button class="'+(AREA.dir==='SB'?'on':'')+'" onclick="aset(\'dir\',\'SB\')">SB</button>'+
        '</div></div>';
     h+=laneField(AREA.lane,'aset');
-  if(it.thick && it.thick.length){
-    h+='<div class="fld"><label>Thickness</label><div class="seg">';
-    it.thick.forEach(function(mm){
-      h+='<button class="'+(String(AREA.mm)===String(mm)?'on':'')+'" '+
-         'onclick="aset(\'mm\',\''+mm+'\')">'+mm+' mm</button>';
-    });
-    h+='</div></div>';
-  }
   }
 
   if(!ready()){
@@ -1429,9 +1421,9 @@ function dateSettled(){
 function aset(k,v){
   // Everything not yet saved goes in under one direction and lane, so those
   // cannot change underneath it without misfiling the work.
-  if((k==='dir'||k==='lane'||k==='mm') && AREA.segs.length && AREA[k]!==v){
+  if((k==='dir'||k==='lane') && AREA.segs.length && AREA[k]!==v){
     AREA.err='Save the '+AREA.segs.length+' measurement'+(AREA.segs.length===1?'':'s')+
-             ' below first \u2014 they were taken in '+(AREA.dir||'')+' '+(AREA.lane||'')+(AREA.mm?' at '+AREA.mm+' mm':'')+'.';
+             ' below first \u2014 they were taken in '+(AREA.dir||'')+' '+(AREA.lane||'')+'.';
     openArea(AREA.code, AREA.ok);
     return;
   }
@@ -2044,7 +2036,6 @@ function ctxLine(){
   if(AREA.mode!=='desc'){
     if(AREA.dir) bits.push(AREA.dir);
     if(AREA.lane) bits.push(AREA.lane);
-    if(AREA.mm) bits.push(AREA.mm+' mm');
   }
   return bits.join('  ·  ');
 }
@@ -2052,8 +2043,6 @@ function ctxLine(){
 /** Everything the entry needs before it can begin. */
 function ctxDone(){
   if(!AREA || !AREA.date || !AREA.site) return false;
-  var it=byCode(AREA.code);
-  if(it && it.thick && it.thick.length && !AREA.mm) return false;
   return AREA.mode==='desc' ? true : !!AREA.lane;
 }
 
@@ -2072,12 +2061,7 @@ function lastLine(it){
          '<b>Left off:</b> '+esc(bits.join(' · '))+(right?'  ·  '+right:'')+'</div>';
 }
 
-function ready(){
-  if(!(AREA && AREA.date && AREA.site)) return false;
-  var it=byCode(AREA.code);
-  if(it && it.thick && it.thick.length && !AREA.mm) return false;   // 50, 75 or 100
-  return true;
-}
+function ready(){ return !!(AREA && AREA.date && AREA.site); }
 
 function segPreview(){
   if(!ready()) return {ok:false, why:'Choose the date and job site first'};
@@ -2088,9 +2072,6 @@ function segPreview(){
     return {ok:true, area:a.toLocaleString(undefined,{maximumFractionDigits:1})+' m²',
             note:String(AREA.dnote).trim()};
   }
-  var itk=byCode(AREA.code);
-  if(itk && itk.thick && itk.thick.length && !AREA.mm)
-    return {ok:false, why:'Choose the thickness'};
   if(!AREA.lane) return {ok:false, why:'Choose a lane'};
   if(AREA.s1===''||AREA.s2===''||AREA.w1===''||AREA.w2==='') return {ok:false};
   var itc=byCode(AREA.code);
@@ -2160,7 +2141,7 @@ function submitArea(){
   document.getElementById('view').innerHTML=
     '<div class="center"><div class="spin"></div>Saving…<br><span class="muted">a few seconds</span></div>';
   var payload={code:AREA.code, date:AREA.date, site:AREA.site, dir:AREA.dir,
-               lane:AREA.lane, mm:AREA.mm, tonnes:AREA.tonnes,
+               lane:AREA.lane, tonnes:AREA.tonnes,
                segments:AREA.segs, code_:CODE};
   var n=AREA.segs.length, ar=areaTotal(), code0=AREA.code;
   google.script.run
