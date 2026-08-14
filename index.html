@@ -594,6 +594,8 @@ function openItem(code){
        (it.lastSite?' · <span class="pill">'+esc(it.lastSite)+'</span>':'')+
        (it.lastLoc?'<br>'+esc(it.lastLoc):'')+'</div>';
   }
+  if(it.paving && it.code!=='05.02.01'){ loadCoverage(it.code); h+=coverHtml(it.code); }
+
   if(it.code==='05.02.02'){
     h+='<button class="btn" onclick="TACK=null;openTack()">Work out the tack coat</button>';
   }else if(it.entry==='area'){
@@ -1161,6 +1163,34 @@ function saveTack(){
       openTack('Held on this phone — it will be sent when there is signal.');
     })
     .postTack(payload);
+}
+
+/**
+ * How far the tonnage left will reach at the rate being run.
+ *
+ * Paving is paid by the tonne against a fixed quantity, so a high rate earns
+ * sooner but covers less road. This is the number that says whether holding
+ * the top of the bonus band will still see the job finished.
+ */
+var COVER = {};
+
+function loadCoverage(code){
+  if(COVER[code]!==undefined) return;
+  COVER[code]=null;
+  google.script.run.withSuccessHandler(function(c){
+    COVER[code]=c||null;
+    if(SCREEN==='item'&&CURRENT===code) openItem(code);
+  }).withFailureHandler(function(){}).coverage({code:code, code_:CODE});
+}
+
+function coverHtml(code){
+  var c=COVER[code];
+  if(!c||!c.rate||!c.reach) return '';
+  return '<div class="calc" style="margin-top:14px">'+
+    '<div class="lab">What is left will cover</div>'+
+    '<div class="val">'+c.reach.toLocaleString()+'<small> m²</small></div>'+
+    '<div class="sub">'+Math.round(c.left).toLocaleString()+' t remaining at '+
+    c.rate.toFixed(1)+' kg/m², the rate run so far</div></div>';
 }
 
 function openArea(code, keepMsg){
