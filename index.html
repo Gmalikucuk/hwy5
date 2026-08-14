@@ -2133,12 +2133,15 @@ function segRate(){
 function segRateHtml(it){
   var r=segRate();
   if(!r) return '';
+  // the crew judge the work in percent, so that is the figure to put in front
+  // of them; the kg/m² sits underneath for anyone who wants it
+  var big = (r.pct!==null) ? (r.pct*100).toFixed(1)+'<small> %</small>'
+                           : r.rate.toFixed(1)+'<small> kg/m²</small>';
   return '<div class="calc" style="'+(r.out?'background:#fdecea':'')+'">'+
     '<div class="lab">This one works out at</div>'+
-    '<div class="val'+(r.out?' r':'')+'">'+r.rate.toFixed(1)+
-    '<small> kg/m²</small></div>'+
-    '<div class="sub">'+Math.round(r.area).toLocaleString()+' m²'+
-    (r.pct!==null?'  ·  '+(r.pct*100).toFixed(1)+'% of design':'')+
+    '<div class="val'+(r.out?' r':'')+'">'+big+'</div>'+
+    '<div class="sub">'+r.rate.toFixed(1)+' kg/m²  ·  '+
+    Math.round(r.area).toLocaleString()+' m²'+
     (r.out?'  ·  outside '+(r.lo*100).toFixed(0)+'\u2013'+(r.hi*100).toFixed(0)+
       '%, check the tonnage':'')+'</div></div>';
 }
