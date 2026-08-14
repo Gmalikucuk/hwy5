@@ -1273,10 +1273,12 @@ function openArea(code, keepMsg){
     h+='<div class="fld"><label>Where</label>'+
        '<input type="text" value="'+esc(AREA.dnote)+'" '+
        'placeholder="Intersection at Brodie approach" oninput="afield(\'dnote\',this.value)"></div>';
-    if(it.segTonnes)
+    if(it.segTonnes){
       h+='<div class="fld"><label>Tonnes on this one</label>'+
          '<input type="number" inputmode="decimal" step="0.01" value="'+esc(AREA.segT)+'" '+
-         'placeholder="off the ticket" oninput="afield(\'segT\',this.value)"></div>';
+         'placeholder="what went in here" oninput="afield(\'segT\',this.value)"></div>';
+      h+='<div id="a_seg">'+segRateHtml(it)+'</div>';
+    }
     h+='<div id="a_btn">'+buttonHtml()+'</div>';
     h+='<div style="text-align:center;margin:10px 0"><span class="muted" '+
        'style="text-decoration:underline" onclick="aset(\'mode\',\'sta\')">'+
@@ -1296,10 +1298,12 @@ function openArea(code, keepMsg){
        '<div class="fld"><label>Width there (m)</label>'+
        '<input type="number" inputmode="decimal" step="0.01" id="g_w2" value="'+esc(AREA.w2)+'" '+
        'placeholder="9.00" oninput="afield(\'w2\',this.value)"></div></div>';
-    if(it.segTonnes)
+    if(it.segTonnes){
       h+='<div class="fld"><label>Tonnes on this one</label>'+
          '<input type="number" inputmode="decimal" step="0.01" value="'+esc(AREA.segT)+'" '+
-         'placeholder="off the ticket" oninput="afield(\'segT\',this.value)"></div>';
+         'placeholder="what went in here" oninput="afield(\'segT\',this.value)"></div>';
+      h+='<div id="a_seg">'+segRateHtml(it)+'</div>';
+    }
     h+='<div id="a_clash">'+clashHtml()+'</div>';
     h+='<div id="a_btn">'+buttonHtml()+'</div>';
     h+='<div style="text-align:center;margin:10px 0"><span class="muted" '+
@@ -1458,6 +1462,8 @@ function afield(k,v){
   // Only the three small blocks are rewritten. Redrawing the screen would
   // destroy whichever field is being typed into and drop the keyboard.
   var c=document.getElementById('a_clash'); if(c) c.innerHTML=clashHtml();
+  var g=document.getElementById('a_seg');
+  if(g){ var itg=byCode(AREA.code); if(itg) g.innerHTML=segRateHtml(itg); }
   var b=document.getElementById('a_btn');  if(b) b.innerHTML=buttonHtml();
   if(k==='tonnes'||k==='segT'||k==='at'||k==='atw'||
      k==='endT'||k==='endAt'||k==='endW') keepDraft();
@@ -2099,6 +2105,42 @@ function ready(){
   var it=byCode(AREA.code);
   if(it && it.lifts && it.lifts.length && !AREA.lift) return false;
   return true;
+}
+
+/**
+ * The rate this patch implies. Nobody can know what a truck actually dumped
+ * into one place, so the figure entered is a judgement — and this is the check
+ * on it. The day's rate is an average of these, and it can only be sound if
+ * each one was.
+ */
+function segRate(){
+  var it=byCode(AREA.code);
+  if(!it || !it.segTonnes) return null;
+  var t=Number(AREA.segT);
+  if(!(t>0)) return null;
+  var s1=Number(AREA.s1), s2=Number(AREA.s2), w1=Number(AREA.w1), w2=Number(AREA.w2);
+  var a = (AREA.mode==='desc') ? Number(AREA.darea)
+        : (isFinite(s1)&&isFinite(s2)&&isFinite(w1)&&isFinite(w2)&&s1!==s2)
+          ? Math.abs(s2-s1)*(w1+w2)/2 : 0;
+  if(!(a>0)) return null;
+  var rate=t*1000/a;
+  var pct=DATA.designRate ? rate/DATA.designRate : null;
+  var lo=DATA.bandLow||0.96, hi=DATA.bandHigh||1.04;
+  return {area:a, rate:rate, pct:pct,
+          out: pct!==null && (pct<lo || pct>hi), lo:lo, hi:hi};
+}
+
+function segRateHtml(it){
+  var r=segRate();
+  if(!r) return '';
+  return '<div class="calc" style="'+(r.out?'background:#fdecea':'')+'">'+
+    '<div class="lab">This one works out at</div>'+
+    '<div class="val'+(r.out?' r':'')+'">'+r.rate.toFixed(1)+
+    '<small> kg/m²</small></div>'+
+    '<div class="sub">'+Math.round(r.area).toLocaleString()+' m²'+
+    (r.pct!==null?'  ·  '+(r.pct*100).toFixed(1)+'% of design':'')+
+    (r.out?'  ·  outside '+(r.lo*100).toFixed(0)+'\u2013'+(r.hi*100).toFixed(0)+
+      '%, check the tonnage':'')+'</div></div>';
 }
 
 function segPreview(){
