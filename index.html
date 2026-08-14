@@ -243,8 +243,13 @@ function newRunner(){
     return a[0] || {};
   }
 
-  ['getProgress','daySoFar','photoCount','postEntry','postMeasurement',
-   'postDayTonnage','postEstimate','postPhoto'].forEach(function(name){
+  /* Every call the server offers. Keep this in step with API in WebApp.gs:
+     a name missing here does not error, it simply never returns, and the
+     screen waits for an answer that is not coming. */
+  ['getProgress','daySoFar','photoCount','photosFor','deletePhoto',
+   'postEntry','postMeasurement','postDayTonnage','postEstimate','postPhoto',
+   'postTruck','trucksToday','editEntry','coverage',
+   'tackForDay','postTack'].forEach(function(name){
     r[name] = function(){
       var args = Array.prototype.slice.call(arguments);
       var payload = (args.length===1 && args[0] && typeof args[0]==='object')
@@ -273,7 +278,16 @@ function newRunner(){
 }
 
 var google = { script: {} };
-Object.defineProperty(google.script, 'run', { get: function(){ return newRunner(); } });
+Object.defineProperty(google.script, 'run', { get: function(){
+  var r = newRunner();
+  // anything not wired up should say so at once rather than wait for ever
+  return new Proxy(r, { get: function(t, k){
+    if(k in t) return t[k];
+    if(typeof k === 'string' && k.indexOf('_') !== 0)
+      return function(){ if(t._f) t._f(new Error('That call is not wired up: '+k)); return t; };
+    return undefined;
+  }});
+}});
 
 /* A photo is large. Rather than let the queue burst its limit silently,
    refuse politely and say why. */
