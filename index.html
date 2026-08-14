@@ -751,6 +751,8 @@ function openEntry(code, keepMsg){
        'placeholder="NB 52+100, 52+340" oninput="fset(\'loc\',this.value)"></div>';
   }
 
+  if(FORM.date && FORM.site) h+=shotsHtml();
+
   if((FORM.entries||[]).length){
     var tot=FORM.entries.reduce(function(a,e){return a+(Number(e.qty)||0);},0);
     h+='<div class="grp" style="margin-top:16px">Already entered on this day  \u00b7  '+
@@ -1287,6 +1289,8 @@ function openArea(code, keepMsg){
        'an area with no stations</span></div>';
   }
 
+  if(ready()) h+=shotsHtml();
+
   if(ready() && (AREA.daySegs||[]).length){
     h+='<div class="grp" style="margin-top:16px">Already saved on this day</div>';
     h+='<div class="pts">';
@@ -1576,8 +1580,8 @@ function sendPhoto(data){
   google.script.run
     .withSuccessHandler(function(res){
       PHOTO.busy=false;
-      if(res&&res.ok){ PHOTO.n=res.count||PHOTO.n+1; }
-      showCam(true);
+      if(res&&res.ok){ PHOTO.n=res.count||PHOTO.n+1; SHOTS.key=''; if(SHOTS.open) loadShots(); }
+      showCam(true); redrawScreen();
     })
     .withFailureHandler(function(){
       PHOTO.busy=false;
@@ -1586,6 +1590,65 @@ function sendPhoto(data){
     })
     .postPhoto(ppayload={code_:CODE, code:PHOTO.code, date:PHOTO.date, site:PHOTO.site,
                 dir:PHOTO.dir, lane:PHOTO.lane, note:PHOTO.where, data:data});
+}
+
+/**
+ * The photographs already taken here, with a way to bin one.
+ * A better angle turns up often enough that replacing a shot has to be easy.
+ */
+var SHOTS = { key:'', list:[], open:false };
+
+function shotsKey(){ return PHOTO.code+'|'+PHOTO.date+'|'+PHOTO.site; }
+
+function loadShots(){
+  if(!PHOTO.code||!PHOTO.date||!PHOTO.site) return;
+  var k=shotsKey();
+  google.script.run.withSuccessHandler(function(list){
+    if(shotsKey()!==k) return;
+    SHOTS.key=k; SHOTS.list=list||[]; PHOTO.n=SHOTS.list.length;
+    showCam(true); redrawScreen();
+  }).withFailureHandler(function(){}).photosFor({code:PHOTO.code, date:PHOTO.date,
+    site:PHOTO.site, code_:CODE});
+}
+
+function toggleShots(){
+  SHOTS.open=!SHOTS.open;
+  if(SHOTS.open && SHOTS.key!==shotsKey()) loadShots();
+  redrawScreen();
+}
+
+function shotsHtml(){
+  if(!PHOTO.code||!PHOTO.date||!PHOTO.site) return '';
+  var n=PHOTO.n||0;
+  var h='<div class="grp" style="margin-top:16px;cursor:pointer" onclick="toggleShots()">'+
+        'Photographs  \u00b7  '+n+'  '+(SHOTS.open?'\u25B2':'\u25BC')+'</div>';
+  if(!SHOTS.open) return h;
+  if(!SHOTS.list.length) return h+'<div class="note">None taken here yet.</div>';
+  h+='<div class="pts">';
+  SHOTS.list.forEach(function(f){
+    h+='<div class="pt"><div class="txt" style="flex:1;min-width:0">'+
+       '<div style="font-weight:600;font-size:13px">'+esc(f.when)+'</div>'+
+       '<div style="font-size:11px;color:var(--grey);overflow:hidden;'+
+       'text-overflow:ellipsis;white-space:nowrap">'+esc(f.name)+'</div></div>'+
+       '<div class="x" onclick="binShot(\''+f.id+'\')">&times;</div></div>';
+  });
+  return h+'</div>';
+}
+
+function binShot(id){
+  google.script.run.withSuccessHandler(function(res){
+    if(res&&res.ok){
+      SHOTS.list=SHOTS.list.filter(function(f){return f.id!==id;});
+      PHOTO.n=SHOTS.list.length; showCam(true); redrawScreen();
+    }
+  }).withFailureHandler(function(){}).deletePhoto({id:id, code_:CODE});
+}
+
+/** Redraws whichever screen is showing, without knowing which it is. */
+function redrawScreen(){
+  if(SCREEN==='area' && AREA) openArea(AREA.code, AREA.ok);
+  else if(SCREEN==='entry' && FORM) openEntry(FORM.code, FORM.ok);
+  else if(SCREEN==='tack' && TACK) openTack(TACK.ok);
 }
 
 function stickBelowBar(){
