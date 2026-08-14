@@ -653,10 +653,7 @@ function openEntry(code, keepMsg){
   // anything laid along the road needs a direction; only the counts do not
   // anything laid along the road needs a direction; only the counts do not
   if(isM || it.entry==='bulk' || it.entry==='tiein' || it.entry==='point'){
-    h+='<div class="fld"><label>Direction</label><div class="seg">'+
-       '<button class="'+(FORM.dir==='NB'?'on':'')+'" onclick="fset(\'dir\',\'NB\')">NB &#8593;</button>'+
-       '<button class="'+(FORM.dir==='SB'?'on':'')+'" onclick="fset(\'dir\',\'SB\')">SB &#8595;</button>'+
-       '</div></div>';
+    h+=dirField(FORM.site, FORM.dir, 'fset');
   }
 
   if(isM){
@@ -1238,7 +1235,7 @@ function openArea(code, keepMsg){
          site:(it.sites&&it.sites.length===1)?it.sites[0]:'',
          dir:it.lastDir||'NB', lane:'', segs:[], mode:'sta',
          s1:'', w1:'', s2:'', w2:'', darea:'', dnote:'',
-         tonnes:'', segT:'', at:'', atw:'', confirming:false,
+         tonnes:'', segT:'', lift:'', at:'', atw:'', confirming:false,
          endT:'', endAt:'', endW:'', closed:null, closedArea:0,
          dayArea:0, dayTonnes:0, daySegs:[], err:'', ok:''};
   }
@@ -1260,11 +1257,9 @@ function openArea(code, keepMsg){
     h+='<div class="fld"><label>Date</label><input type="date" value="'+esc(AREA.date)+'" '+
        'onchange="dateChanged(this.value)" onblur="dateSettled()"></div>';
     h+=siteField(it, AREA.site, 'aset');
-    h+='<div class="fld"><label>Direction</label><div class="seg">'+
-       '<button class="'+(AREA.dir==='NB'?'on':'')+'" onclick="aset(\'dir\',\'NB\')">NB</button>'+
-       '<button class="'+(AREA.dir==='SB'?'on':'')+'" onclick="aset(\'dir\',\'SB\')">SB</button>'+
-       '</div></div>';
+    h+=dirField(AREA.site, AREA.dir, 'aset');
     h+=laneField(AREA.lane,'aset');
+  h+=liftField(it, AREA.lift, 'aset');
   }
 
   if(!ready()){
@@ -1421,7 +1416,7 @@ function dateSettled(){
 function aset(k,v){
   // Everything not yet saved goes in under one direction and lane, so those
   // cannot change underneath it without misfiling the work.
-  if((k==='dir'||k==='lane') && AREA.segs.length && AREA[k]!==v){
+  if((k==='dir'||k==='lane'||k==='lift') && AREA.segs.length && AREA[k]!==v){
     AREA.err='Save the '+AREA.segs.length+' measurement'+(AREA.segs.length===1?'':'s')+
              ' below first \u2014 they were taken in '+(AREA.dir||'')+' '+(AREA.lane||'')+'.';
     openArea(AREA.code, AREA.ok);
@@ -1469,6 +1464,39 @@ function afield(k,v){
 }
 
 /** Only the sites this item is worked at. One option means no choice to make. */
+/** Job A runs northbound only, so nothing else is offered there. */
+function dirsFor(site){
+  var m = DATA.dirs || {};
+  return (site && m[site]) ? m[site] : ['NB','SB'];
+}
+
+function dirField(site, chosen, setter){
+  var list = dirsFor(site);
+  if(list.length===1){
+    return '<div class="fld"><label>Direction</label>'+
+           '<div style="padding:14px;border:1px solid var(--line);border-radius:10px;'+
+           'background:#f2f2f0;color:var(--grey);font-size:16px">'+esc(list[0])+
+           '  \u00b7  the only direction here</div></div>';
+  }
+  var h='<div class="fld"><label>Direction</label><div class="seg">';
+  list.forEach(function(d){
+    h+='<button class="'+(chosen===d?'on':'')+'" onclick="'+setter+
+       '(\'dir\',\''+d+'\')">'+d+'</button>';
+  });
+  return h+'</div></div>';
+}
+
+/** Which run this was, where a line is paved more than once. */
+function liftField(it, chosen, setter){
+  if(!it.lifts || !it.lifts.length) return '';
+  var h='<div class="fld"><label>Which run</label><div class="seg">';
+  it.lifts.forEach(function(L){
+    h+='<button class="'+(chosen===L?'on':'')+'" onclick="'+setter+
+       '(\'lift\',\''+L+'\')">'+L+'</button>';
+  });
+  return h+'</div></div>';
+}
+
 function siteField(it, chosen, setter){
   var list = (it.sites && it.sites.length) ? it.sites : DATA.sites;
   if(list.length===1){
@@ -2036,6 +2064,7 @@ function ctxLine(){
   if(AREA.mode!=='desc'){
     if(AREA.dir) bits.push(AREA.dir);
     if(AREA.lane) bits.push(AREA.lane);
+    if(AREA.lift) bits.push(AREA.lift+' lift');
   }
   return bits.join('  ·  ');
 }
@@ -2043,6 +2072,8 @@ function ctxLine(){
 /** Everything the entry needs before it can begin. */
 function ctxDone(){
   if(!AREA || !AREA.date || !AREA.site) return false;
+  var it=byCode(AREA.code);
+  if(it && it.lifts && it.lifts.length && !AREA.lift) return false;
   return AREA.mode==='desc' ? true : !!AREA.lane;
 }
 
@@ -2061,7 +2092,12 @@ function lastLine(it){
          '<b>Left off:</b> '+esc(bits.join(' · '))+(right?'  ·  '+right:'')+'</div>';
 }
 
-function ready(){ return !!(AREA && AREA.date && AREA.site); }
+function ready(){
+  if(!(AREA && AREA.date && AREA.site)) return false;
+  var it=byCode(AREA.code);
+  if(it && it.lifts && it.lifts.length && !AREA.lift) return false;
+  return true;
+}
 
 function segPreview(){
   if(!ready()) return {ok:false, why:'Choose the date and job site first'};
@@ -2096,7 +2132,8 @@ function segPreview(){
 function overlaps(s1,s2){
   var lo=Math.min(s1,s2), hi=Math.max(s1,s2);
   var all=(AREA.daySegs||[]).filter(function(g){
-    return g.kind==='sta' && g.dir===AREA.dir && g.lane===AREA.lane;
+    return g.kind==='sta' && g.dir===AREA.dir && g.lane===AREA.lane &&
+           (g.lift||'')===(AREA.lift||'');
   }).concat(AREA.segs.filter(function(g){ return g.kind!=='desc'; }));
   for(var i=0;i<all.length;i++){
     var a=Math.min(all[i].s1,all[i].s2), b=Math.max(all[i].s1,all[i].s2);
@@ -2141,7 +2178,7 @@ function submitArea(){
   document.getElementById('view').innerHTML=
     '<div class="center"><div class="spin"></div>Saving…<br><span class="muted">a few seconds</span></div>';
   var payload={code:AREA.code, date:AREA.date, site:AREA.site, dir:AREA.dir,
-               lane:AREA.lane, tonnes:AREA.tonnes,
+               lane:AREA.lane, lift:AREA.lift, tonnes:AREA.tonnes,
                segments:AREA.segs, code_:CODE};
   var n=AREA.segs.length, ar=areaTotal(), code0=AREA.code;
   google.script.run
