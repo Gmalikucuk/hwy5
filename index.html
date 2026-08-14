@@ -772,6 +772,17 @@ function openEntry(code, keepMsg){
          (e.reported ? '<div class="a" style="font-size:11px">reported</div>'
                      : '<div class="x" style="font-size:14px">edit</div>')+
          '</div>';
+      var shots=(SHOTS.key===shotsKey())
+        ? SHOTS.list.filter(function(f){ return e.tag && f.tag===e.tag; }) : [];
+      if(shots.length && !open){
+        h+='<div style="padding:0 14px 10px;border-bottom:1px solid var(--line);'+
+           'display:flex;gap:6px;flex-wrap:wrap">';
+        shots.forEach(function(f){
+          h+='<span style="font-size:11px;color:var(--grey);background:#f2f2f0;'+
+             'border-radius:20px;padding:3px 9px">photo '+esc(f.when)+'</span>';
+        });
+        h+='</div>';
+      }
       if(open){
         h+='<div style="padding:12px 14px;border-bottom:1px solid var(--line)">'+
            '<div class="fld"><label>Quantity ('+esc(e.uom||it.uom)+')</label>'+
@@ -782,6 +793,16 @@ function openEntry(code, keepMsg){
            'oninput="FORM.editLoc=this.value"></div>'+
            '<button class="btn save" onclick="saveEdit('+e.row+')">Change it</button>'+
            '<button class="btn ghost" onclick="removeRow('+e.row+')">Remove this entry</button>'+
+           (shots.length
+             ? '<div class="grp" style="margin-top:4px">Its photographs</div><div class="pts">'+
+               shots.map(function(f){
+                 return '<div class="pt"><div class="txt" style="flex:1;min-width:0">'+
+                   '<div style="font-weight:600;font-size:13px">'+esc(f.when)+'</div></div>'+
+                   '<div class="x" onclick="binShot(\''+f.id+'\')">&times;</div></div>';
+               }).join('')+'</div>'
+             : '<div class="note">No photograph taken for this one.</div>')+
+           '<button class="btn ghost" onclick="photoForRow(\''+e.tag+'\')">'+
+           'Photograph this entry</button>'+
            '<button class="btn ghost" onclick="FORM.editing=null;openEntry(FORM.code)">'+
            'Leave it</button></div>';
       }
@@ -791,7 +812,7 @@ function openEntry(code, keepMsg){
   h+='<button class="btn" onclick="submitEntry()">Save entry</button>';
   h+='<button class="btn ghost" onclick="FORM=null;openItem(\''+code+'\')">Cancel</button>';
   document.getElementById('view').innerHTML=h;
-  armCamera(code, FORM.date, FORM.site, FORM.dir, FORM.lane, entryWhere());
+  armCamera(code, FORM.date, FORM.site, FORM.dir, FORM.lane, entryWhere(), FORM.tag||'');
 
 }
 
@@ -839,6 +860,13 @@ function dropCut(i){
 /* An entry already on the tracker can be put right from here, so nobody has
    to open the sheet to fix a typed figure. Anything already reported to the
    ministry is left alone: a silent change would leave the two out of step. */
+
+/** Takes a photograph against one entry rather than the screen in general. */
+function photoForRow(tag){
+  PHOTO.tag = tag || '';
+  var el=document.getElementById('camIn');
+  if(el){ el.value=''; el.setAttribute('data-for',''); el.click(); }
+}
 
 function editRow(row){
   var e=(FORM.entries||[]).filter(function(x){return x.row===row;})[0];
@@ -938,7 +966,8 @@ function submitEntry(){
       // almost always the same day at the same site
       FORM.qty=''; FORM.from=''; FORM.to=''; FORM.at='';
       FORM.loc=''; FORM.cuts=[]; FORM.way='';
-      FORM.err=''; FORM.ok=saved;
+      FORM.err=''; FORM.ok=saved; FORM.tag='';
+      SHOTS.key='';
       openEntry(code, saved);
       loadEntries();
     })
@@ -1513,7 +1542,7 @@ function toggleCtx(){ AREA.showCtx=!AREA.showCtx; openArea(AREA.code, AREA.ok); 
    The camera sits in the header so it costs no room on the screen. It appears
    once a date and job site are chosen, because that is what files the photo. */
 
-var PHOTO = {code:'', date:'', site:'', dir:'', lane:'', where:'', n:0, busy:false};
+var PHOTO = {code:'', date:'', site:'', dir:'', lane:'', where:'', tag:'', n:0, busy:false};
 
 function showCam(on, it){
   var el=document.getElementById('cam');
@@ -1524,10 +1553,10 @@ function showCam(on, it){
   if(n) n.textContent = PHOTO.busy ? '…' : (PHOTO.n ? String(PHOTO.n) : '');
 }
 
-function armCamera(code, date, site, dir, lane, where){
+function armCamera(code, date, site, dir, lane, where, tag){
   var changed = (PHOTO.code!==code||PHOTO.date!==date||PHOTO.site!==site);
   PHOTO.code=code; PHOTO.date=date; PHOTO.site=site; PHOTO.dir=dir||''; PHOTO.lane=lane||'';
-  PHOTO.where=where||'';
+  PHOTO.where=where||''; PHOTO.tag=tag||'';
   var on = !!(code && date && site);
   if(changed && on){
     PHOTO.n=0;
@@ -1589,7 +1618,8 @@ function sendPhoto(data){
       PHOTO.n++; showCam(true);
     })
     .postPhoto(ppayload={code_:CODE, code:PHOTO.code, date:PHOTO.date, site:PHOTO.site,
-                dir:PHOTO.dir, lane:PHOTO.lane, note:PHOTO.where, data:data});
+                dir:PHOTO.dir, lane:PHOTO.lane, note:PHOTO.where, tag:PHOTO.tag,
+                data:data});
 }
 
 /**
@@ -1613,19 +1643,22 @@ function loadShots(){
 
 function toggleShots(){
   SHOTS.open=!SHOTS.open;
-  if(SHOTS.open && SHOTS.key!==shotsKey()) loadShots();
+  if(SHOTS.open) loadShots();
   redrawScreen();
 }
 
 function shotsHtml(){
   if(!PHOTO.code||!PHOTO.date||!PHOTO.site) return '';
   var n=PHOTO.n||0;
-  var h='<div class="grp" style="margin-top:16px;cursor:pointer" onclick="toggleShots()">'+
-        'Photographs  \u00b7  '+n+'  '+(SHOTS.open?'\u25B2':'\u25BC')+'</div>';
+  var h='<div class="grp" style="margin-top:16px">Photographs  \u00b7  '+n+'</div>'+
+        '<button class="btn ghost" onclick="toggleShots()">'+
+        (SHOTS.open?'Hide them':'Show them')+'</button>';
   if(!SHOTS.open) return h;
-  if(!SHOTS.list.length) return h+'<div class="note">None taken here yet.</div>';
+  var mine = (SHOTS.key===shotsKey()) ? SHOTS.list : [];
+  if(!mine.length) return h+'<div class="note">'+
+    (SHOTS.key===shotsKey()?'None taken here yet.':'Loading\u2026')+'</div>';
   h+='<div class="pts">';
-  SHOTS.list.forEach(function(f){
+  mine.forEach(function(f){
     h+='<div class="pt"><div class="txt" style="flex:1;min-width:0">'+
        '<div style="font-weight:600;font-size:13px">'+esc(f.when)+'</div>'+
        '<div style="font-size:11px;color:var(--grey);overflow:hidden;'+
