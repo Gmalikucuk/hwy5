@@ -644,7 +644,8 @@ function openEntry(code, keepMsg){
 
   h+=lastLine(it);
   h+='<div class="fld"><label>Date</label>'+
-     '<input type="date" id="f_date" value="'+esc(FORM.date)+'" onchange="fset(\'date\',this.value)"></div>';
+     '<input type="date" id="f_date" value="'+esc(FORM.date)+'" '+
+     'onchange="fdateChanged(this.value)" onblur="fdateSettled()"></div>';
 
   h+=siteField(it, FORM.site, 'fset');
   if(it.entry==='m' && (it.code==='04.07.02'||it.code==='04.07.01'))
@@ -665,10 +666,7 @@ function openEntry(code, keepMsg){
        '<div class="fld"><label>To station</label>'+
        '<input type="number" inputmode="numeric" id="f_to" value="'+esc(FORM.to)+'" '+
        'placeholder="52240" oninput="fset(\'to\',this.value)"></div></div>';
-    var L=lengthOf();
-    h+='<div class="calc"><div class="lab">Quantity</div>'+
-       '<div class="val'+(L.bad?' r':'')+'">'+(L.text)+'</div>'+
-       '<div class="sub">'+esc(L.note)+'</div></div>';
+    h+='<div id="f_calc">'+lengthHtml()+'</div>';
     h+='<div class="fld"><label>Note (optional)</label>'+
        '<input type="text" id="f_loc" value="'+esc(FORM.loc)+'" '+
        'placeholder="side, anything worth saying" oninput="fset(\'loc\',this.value)"></div>';
@@ -702,12 +700,7 @@ function openEntry(code, keepMsg){
        '<input type="number" inputmode="decimal" step="0.01" id="f_fac" value="'+esc(FORM.fac)+'" '+
        'placeholder="'+(FORM.way==='L'?'2.2':'5.0')+'" '+
        'oninput="fset(\'fac\',this.value)"></div></div>';
-    var cutOk = FORM.way && Number(FORM.qty)>0;
-    h+= cutOk
-      ? '<button class="btn go" onclick="addCut()">Add '+
-        (Math.round(Number(FORM.qty)*cutFactor()*100)/100).toLocaleString()+' m²'+
-        '<span class="sub">'+esc(FORM.qty)+' × '+cutFactor()+' m</span></button>'
-      : '<button class="btn off">Add this measurement</button>';
+    h+='<div id="f_cut">'+cutBtnHtml()+'</div>';
     if((FORM.cuts||[]).length){
       var ctot=FORM.cuts.reduce(function(a,c){return a+c.area;},0);
       h+='<div class="grp" style="margin-top:14px">This tie-in  \u00b7  '+
@@ -813,23 +806,44 @@ function openEntry(code, keepMsg){
 
 }
 
+/**
+ * Typed fields update only the small computed blocks. Redrawing the screen
+ * would destroy whichever box is being typed into, and putting the focus back
+ * afterwards is not something a phone does reliably — the keyboard drops.
+ * The buttons, which are tapped rather than typed into, may redraw freely.
+ */
+var fdateTimer=null;
+
+/**
+ * The same wheel, the same problem: iPhone fires change while it is still
+ * spinning, and redrawing then closes the picker under the finger.
+ */
+function fdateChanged(v){
+  if(!FORM) return;
+  FORM.date=v; FORM.err='';
+  if(fdateTimer) clearTimeout(fdateTimer);
+  fdateTimer=setTimeout(fdateSettled, 600);
+}
+
+function fdateSettled(){
+  if(fdateTimer){ clearTimeout(fdateTimer); fdateTimer=null; }
+  if(!FORM) return;
+  openEntry(FORM.code, FORM.ok);
+  loadEntries();
+}
+
 function fset(k,v){
   FORM[k]=v; FORM.err='';
-  // the tie-in preview lives in the page, so it has to be redrawn as you choose
   if(k==='date'||k==='site') loadEntries();
   PHOTO.where=entryWhere();
-  var redraw = (k==='dir'||k==='from'||k==='to'||k==='way'||k==='qty'||k==='at'||
-                k==='fac'||k==='lane');
-  if(!redraw) return;
-  var focus = (k==='from')?'f_from':(k==='to')?'f_to':(k==='qty')?'f_qty':
-              (k==='at')?'f_at':(k==='fac')?'f_fac':null;
-  var pos = null;
-  if(focus){ var el=document.getElementById(focus); pos = el?el.selectionStart:null; }
-  openEntry(FORM.code, FORM.ok);
-  if(focus){
-    var el2=document.getElementById(focus);
-    if(el2){ el2.focus(); try{ el2.setSelectionRange(pos,pos); }catch(e){} }
+
+  var typed = (k==='from'||k==='to'||k==='qty'||k==='at'||k==='fac'||k==='loc');
+  if(typed){
+    var c=document.getElementById('f_calc'); if(c) c.innerHTML=lengthHtml();
+    var u=document.getElementById('f_cut');  if(u) u.innerHTML=cutBtnHtml();
+    return;
   }
+  if(k==='dir'||k==='lane'||k==='way'||k==='site'||k==='date') openEntry(FORM.code, FORM.ok);
 }
 
 /** What is already on the sheet for this item, day and site. */
@@ -921,8 +935,27 @@ function loadEntries(){
   var code=FORM.code, d=FORM.date, st=FORM.site;
   google.script.run.withSuccessHandler(function(res){
     if(!FORM||FORM.code!==code||FORM.date!==d||FORM.site!==st) return;
-    if(res&&res.ok){ FORM.entries=res.entries||[]; openEntry(code, FORM.ok); }
+    if(!res||!res.ok) return;
+    var before=(FORM.entries||[]).length;
+    FORM.entries=res.entries||[];
+    if(before!==FORM.entries.length || before>0) openEntry(code, FORM.ok);
   }).withFailureHandler(function(){}).daySoFar(code,d,st,CODE);
+}
+
+function lengthHtml(){
+  var L=lengthOf();
+  return '<div class="calc"><div class="lab">Quantity</div>'+
+         '<div class="val'+(L.bad?' r':'')+'">'+(L.text)+'</div>'+
+         '<div class="sub">'+esc(L.note)+'</div></div>';
+}
+
+function cutBtnHtml(){
+  var ok = FORM.way && Number(FORM.qty)>0;
+  return ok
+    ? '<button class="btn go" onclick="addCut()">Add '+
+      (Math.round(Number(FORM.qty)*cutFactor()*100)/100).toLocaleString()+' m²'+
+      '<span class="sub">'+esc(FORM.qty)+' \u00d7 '+cutFactor()+' m</span></button>'
+    : '<button class="btn off">Add this measurement</button>';
 }
 
 function lengthOf(){
@@ -1001,7 +1034,7 @@ function openTrucks(){
   if(TRUCK.err) h+='<div class="err">'+esc(TRUCK.err)+'</div>';
 
   h+='<div class="fld"><label>Date</label><input type="date" value="'+esc(TRUCK.date)+'" '+
-     'onchange="tset(\'date\',this.value)"></div>';
+     'onchange="tdateChanged(this.value)" onblur="tdateSettled()"></div>';
   h+='<div class="fld"><label>Job site</label>'+
      '<select onchange="tset(\'site\',this.value)"><option value="">Choose…</option>';
   DATA.sites.forEach(function(sv){
@@ -1038,6 +1071,19 @@ function openTrucks(){
   h+='<button class="btn ghost" onclick="TRUCK=null;renderHome()">Done</button>';
   document.getElementById('view').innerHTML=h;
   armCamera('', '', '');
+}
+
+var tdateTimer=null;
+function tdateChanged(v){
+  if(!TRUCK) return;
+  TRUCK.date=v; TRUCK.err='';
+  if(tdateTimer) clearTimeout(tdateTimer);
+  tdateTimer=setTimeout(tdateSettled, 600);
+}
+function tdateSettled(){
+  if(tdateTimer){ clearTimeout(tdateTimer); tdateTimer=null; }
+  if(!TRUCK) return;
+  openTrucks(); loadTrucks();
 }
 
 function tset(k,v){ TRUCK[k]=v; TRUCK.err=''; openTrucks(); if(k==='date'||k==='site') loadTrucks(); }
@@ -1107,7 +1153,7 @@ function openTack(keepMsg){
   if(TACK.err) h+='<div class="err">'+esc(TACK.err)+'</div>';
 
   h+='<div class="fld"><label>Date</label><input type="date" value="'+esc(TACK.date)+'" '+
-     'onchange="kset(\'date\',this.value)"></div>';
+     'onchange="kdateChanged(this.value)" onblur="kdateSettled()"></div>';
   h+='<div class="fld"><label>Job site</label>'+
      '<select onchange="kset(\'site\',this.value)"><option value="">Choose…</option>';
   DATA.sites.forEach(function(sv){
@@ -1152,6 +1198,19 @@ function openTack(keepMsg){
   h+='<button class="btn ghost" onclick="TACK=null;renderHome()">Done</button>';
   document.getElementById('view').innerHTML=h;
   armCamera('05.02.02', TACK.date, TACK.site, '', '', '');
+}
+
+var kdateTimer=null;
+function kdateChanged(v){
+  if(!TACK) return;
+  TACK.date=v; TACK.err=''; TACK.loaded=false;
+  if(kdateTimer) clearTimeout(kdateTimer);
+  kdateTimer=setTimeout(kdateSettled, 600);
+}
+function kdateSettled(){
+  if(kdateTimer){ clearTimeout(kdateTimer); kdateTimer=null; }
+  if(!TACK) return;
+  openTack(TACK.ok); loadTack();
 }
 
 function kset(k,v){ TACK[k]=v; TACK.err=''; TACK.loaded=false; openTack(TACK.ok); loadTack(); }
@@ -1592,7 +1651,9 @@ function armCamera(code, date, site, dir, lane, where, tag){
   if(changed && on){
     PHOTO.n=0;
     google.script.run.withSuccessHandler(function(n){
-      if(PHOTO.code===code&&PHOTO.date===date&&PHOTO.site===site){ PHOTO.n=n||0; showCam(true); }
+      if(PHOTO.code!==code||PHOTO.date!==date||PHOTO.site!==site) return;
+      if((n||0)===PHOTO.n) return;        // nothing to change, so nothing moves
+      PHOTO.n=n||0; showCam(true);
     }).withFailureHandler(function(){}).photoCount(code,date,site,CODE);
   }
   showCam(on);
@@ -2061,13 +2122,15 @@ function loadDay(){
   google.script.run.withSuccessHandler(function(res){
     if(!AREA||AREA.code!==code||AREA.date!==d||AREA.site!==st) return;
     if(!res||!res.ok) return;
+    // The answer arrives a moment after the screen has already been drawn.
+    // Redrawing when nothing has changed makes the screen jump for no reason,
+    // so only redraw when the day's figures are actually different.
+    var before = [AREA.dayArea, AREA.dayTonnes, (AREA.daySegs||[]).length, AREA.closed].join('|');
     AREA.dayArea=res.area||0; AREA.dayTonnes=res.tonnes||0; AREA.daySegs=res.segs||[];
     AREA.closed=(res.closed===null||res.closed===undefined)?null:res.closed;
     AREA.closedArea=AREA.dayArea;   // the area as it stood when the day was closed
-    // the whole screen: the header total, the figures AND the list of what is
-    // already saved all change together. This only runs on a date or site
-    // change and after a save, never while anything is being typed.
-    openArea(code, AREA.ok);
+    var after = [AREA.dayArea, AREA.dayTonnes, (AREA.daySegs||[]).length, AREA.closed].join('|');
+    if(before!==after) openArea(code, AREA.ok);
   }).withFailureHandler(function(){}).daySoFar(code,d,st,CODE);
 }
 
