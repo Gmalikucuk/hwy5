@@ -759,7 +759,7 @@ function openEntry(code, keepMsg){
 
   if((FORM.entries||[]).length){
     var tot=FORM.entries.reduce(function(a,e){return a+(Number(e.qty)||0);},0);
-    h+='<div class="grp" style="margin-top:16px">Already entered on this day  \u00b7  '+
+    h+='<div class="grp" style="margin-top:16px">Today so far  \u00b7  '+
        tot.toLocaleString(undefined,{maximumFractionDigits:2})+' '+esc(it.uom)+'</div>';
     h+='<div class="pts">';
     FORM.entries.slice().reverse().forEach(function(e,ri){
@@ -813,7 +813,10 @@ function openEntry(code, keepMsg){
     });
     h+='</div>';
   }
-  h+='<button class="btn" onclick="submitEntry()">Save entry</button>';
+  h+= (FORM.date && FORM.site)
+    ? '<button class="btn save" onclick="submitEntry()">Save to '+esc(shortDate(FORM.date))+
+      '</button>'
+    : '<button class="btn off">Save</button>';
   h+='<button class="btn ghost" onclick="FORM=null;openItem(\''+code+'\')">Cancel</button>';
   document.getElementById('view').innerHTML=h;
   armCamera(code, FORM.date, FORM.site, FORM.dir, FORM.lane, entryWhere(), FORM.tag||'');
@@ -1064,8 +1067,9 @@ function openTrucks(){
        '<input type="text" value="'+esc(TRUCK.note)+'" '+
        'placeholder="anything worth saying" oninput="tfield(\'note\',this.value)"></div>';
     h+= TRUCK.truck.trim()
-      ? '<button class="btn go" onclick="truckPhoto()">'+
-        (TRUCK.busy?'Recording…':'Photograph and record arrival')+'</button>'
+      ? '<button class="btn save" onclick="truckPhoto()">'+
+        (TRUCK.busy?'Saving\u2026':'Photograph and save to '+esc(shortDate(TRUCK.date)))+
+        '</button>'
       : '<button class="btn off">Photograph and record arrival</button>';
     h+='<div class="note" style="margin-top:8px">The time of arrival is taken '+
        'when the photograph is saved.</div>';
@@ -1200,8 +1204,8 @@ function openTack(keepMsg){
            Number(TACK.already).toLocaleString()+' L is already recorded for this day. '+
            'Saving replaces it.</div>';
       h+= Number(TACK.litres)>0
-        ? '<button class="btn save" onclick="saveTack()">Save '+
-          Number(TACK.litres).toLocaleString(undefined,{maximumFractionDigits:1})+' L</button>'
+        ? '<button class="btn save" onclick="saveTack()">Save to '+
+          esc(shortDate(TACK.date))+'</button>'
         : '<button class="btn off">Save</button>';
     }else{
       h+='<div class="note" style="margin-top:14px">Nothing has been paved at '+
@@ -1387,7 +1391,7 @@ function openArea(code, keepMsg){
   if(ready()) h+=shotsHtml();
 
   if(ready() && (AREA.daySegs||[]).length){
-    h+='<div class="grp" style="margin-top:16px">Already saved on this day</div>';
+    h+='<div class="grp" style="margin-top:16px">Today so far</div>';
     h+='<div class="pts">';
     // newest at the top: the last thing done is the first thing you want to see
     AREA.daySegs.slice().reverse().forEach(function(g){
@@ -1407,7 +1411,7 @@ function openArea(code, keepMsg){
   }
 
   if(AREA.segs.length){
-    h+='<div class="grp" style="margin-top:16px">Not yet saved  ·  '+
+    h+='<div class="grp" style="margin-top:16px">Ready to save  ·  '+
        areaTotal().toLocaleString(undefined,{maximumFractionDigits:1})+' m²</div>';
     h+='<div class="pts">';
     // newest at the top, matching the saved list below it
@@ -1428,26 +1432,30 @@ function openArea(code, keepMsg){
     }
     h+='</div>';
     h+= ready() ? '<button class="btn save" onclick="submitArea()">Save to '+
-       esc(new Date(AREA.date+'T00:00').toLocaleDateString(undefined,{day:'numeric',month:'short'}))+
-       '</button>'
+       esc(shortDate(AREA.date))+'</button>'
        : '<button class="btn off">Save</button>';
   }
+  if(it.paving && it.segTonnes && ready()){
+    h+='<div class="note" style="margin-top:16px">Each measurement is saved with its '+
+       'own tonnage, so there is nothing further to do at the end of the day.</div>';
+  }
+
   if(it.paving && !it.segTonnes && ready() && (AREA.dayArea>0 || AREA.segs.length)){
-    h+='<div class="grp" style="margin-top:18px">End of shift</div>';
+    h+='<div class="grp" style="margin-top:18px">Tonnage for the day</div>';
     if(AREA.confirming){
       h+=confirmHtml(it);
-      h+='<button class="btn go" onclick="finishDay()">Yes, close the day</button>';
+      h+='<button class="btn go" onclick="finishDay()">Yes, save it</button>';
       h+='<button class="btn ghost" onclick="aset(\'confirming\',false)">Not yet</button>';
     }else{
       if(AREA.closed!==null){
         var moved = Math.abs((AREA.dayArea||0)-(AREA.closedArea||0))>0.5 || AREA.segs.length;
         h+='<div class="note" style="margin-bottom:10px;'+
            (moved?'background:#fdecea;color:var(--red)':'')+'">'+
-           'This day was already closed at <b>'+
+           'The day is already saved at <b>'+
            Number(AREA.closed).toLocaleString()+' t</b>.'+
            (moved ? ' Area has been measured since, so that tonnage no longer matches. '+
-                    'Close it again with the full figure.'
-                  : ' Closing it again replaces that figure.')+
+                    'Save it again with the full figure.'
+                  : ' Saving again replaces that figure.')+
            '</div>';
       }
       h+='<div class="fld"><label>Total tonnage for the day</label>'+
@@ -1461,9 +1469,8 @@ function openArea(code, keepMsg){
          '<input type="number" inputmode="decimal" step="0.01" value="'+esc(AREA.endW)+'" '+
          'placeholder="m" oninput="afield(\'endW\',this.value)"></div></div>';
       h+='<div id="a_end">'+endRateHtml(it)+'</div>';
-      h+='<button class="btn" onclick="finishDay()">Close the day'+
-         (AREA.endT!=='' ? ' at '+Number(AREA.endT).toLocaleString()+' t' : '')+
-         '</button>';
+      // its own slot, or typing the tonnage would never bring the button to life
+      h+='<div id="a_endbtn">'+endBtnHtml()+'</div>';
     }
   }
   h+='<button class="btn ghost" onclick="AREA=null;openItem(\''+code+'\')">Done</button>';
@@ -1540,6 +1547,8 @@ function afield(k,v){
   if(g){ var itg=byCode(AREA.code); if(itg) g.innerHTML=segRateHtml(itg); }
   var e2=document.getElementById('a_end');
   if(e2){ var ite=byCode(AREA.code); if(ite) e2.innerHTML=endRateHtml(ite); }
+  var e3=document.getElementById('a_endbtn');
+  if(e3) e3.innerHTML=endBtnHtml();
   var b=document.getElementById('a_btn');  if(b) b.innerHTML=buttonHtml();
   if(k==='tonnes'||k==='segT'||k==='at'||k==='atw'||
      k==='endT'||k==='endAt'||k==='endW') keepDraft();
@@ -1950,6 +1959,13 @@ function rateLine(prefix, station, area, tonnes, rate, designRate){
  * Waiting until the confirmation card is too late to be useful: the figure is
  * what tells the crew whether the tonnage they have is the tonnage they meant.
  */
+function endBtnHtml(){
+  return (AREA.endT!=='' && Number(AREA.endT)>0)
+    ? '<button class="btn save" onclick="finishDay()">Save to '+
+      esc(shortDate(AREA.date))+'</button>'
+    : '<button class="btn off">Save</button>';
+}
+
 function endRateHtml(it){
   var t=Number(AREA.endT);
   if(!(t>0)) return '';
@@ -2059,7 +2075,7 @@ function finishDay(){
   if(!it.paving) return;
   if(AREA.segs.length){
     AREA.err='Save the '+AREA.segs.length+' measurement'+(AREA.segs.length===1?'':'s')+
-             ' below before closing the day.';
+             ' above first.';
     AREA.confirming=false; openArea(AREA.code, AREA.ok); return; }
   if(!(AREA.dayArea>0)){
     AREA.err='No area has been measured for this day yet. Measure and save first.';
@@ -2168,6 +2184,14 @@ function entryWhere(){
   if(FORM.from!=='') return 'at '+staTxt(Number(FORM.from));
   if(FORM.loc) return String(FORM.loc).trim();
   return '';
+}
+
+/** 14 Aug, the way it is said on site. */
+function shortDate(iso){
+  if(!iso) return '';
+  var d=new Date(iso+'T00:00');
+  var mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return d.getDate()+' '+mon[d.getMonth()];
 }
 
 function ctxLine(){
