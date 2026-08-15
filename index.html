@@ -302,6 +302,7 @@ var DATA = null, PINS = null, SCREEN = 'home', CURRENT = null;
 var KEY = 'hwy5.pins.v1';
 var CKEY = 'hwy5.code.v1';
 var QKEY = 'hwy5.queue.v1';
+var SKEY = 'hwy5.site.v1';
 var CODE = '';
 
 function loadCode(){
@@ -322,6 +323,27 @@ function saveCode(c){
 
 var QUEUE = [];
 var SENDING = false;
+
+/**
+ * Where the trucks have been arriving today.
+ *
+ * Loads come from the plant to one place and keep coming there, so after the
+ * first truck the site is already known. This is only for the trucks screen:
+ * the crews work different sites on the same day, and carrying a site across
+ * the measurement screens would file work in the wrong place.
+ */
+function todaySite(){
+  try{
+    var raw = JSON.parse(localStorage.getItem(SKEY) || 'null');
+    if(raw && raw.date === DATA.today) return raw.site;
+  }catch(e){}
+  return '';
+}
+
+function rememberSite(site){
+  if(!site) return;
+  try{ localStorage.setItem(SKEY, JSON.stringify({date:DATA.today, site:site})); }catch(e){}
+}
 
 function loadQueue(){
   try{ QUEUE = JSON.parse(localStorage.getItem(QKEY) || '[]') || []; }catch(e){ QUEUE = []; }
@@ -1040,7 +1062,9 @@ var TRUCK = null;
 
 function openTrucks(){
   SCREEN='trucks';
-  if(!TRUCK) TRUCK={date:'', site:'', truck:'', note:'', today:[], busy:false, err:'', ok:''};
+  // a truck is photographed as it arrives, so the day is today
+  if(!TRUCK) TRUCK={date:DATA.today, site:todaySite(), truck:'', note:'',
+                    today:[], busy:false, loaded:false, err:'', ok:''};
   document.getElementById('back').style.display='block';
   document.getElementById('back').onclick=function(){ TRUCK=null; renderHome(); };
   document.getElementById('title').textContent='Trucks';
@@ -1089,6 +1113,7 @@ function openTrucks(){
   h+='<button class="btn ghost" onclick="TRUCK=null;renderHome()">Done</button>';
   document.getElementById('view').innerHTML=h;
   armCamera('', '', '');
+  if(TRUCK.date && TRUCK.site && !TRUCK.loaded){ TRUCK.loaded=true; loadTrucks(); }
 }
 
 var tdateTimer=null;
@@ -1104,7 +1129,12 @@ function tdateSettled(){
   openTrucks(); loadTrucks();
 }
 
-function tset(k,v){ TRUCK[k]=v; TRUCK.err=''; openTrucks(); if(k==='date'||k==='site') loadTrucks(); }
+function tset(k,v){
+  TRUCK[k]=v; TRUCK.err='';
+  if(k==='site') rememberSite(v);
+  openTrucks();
+  if(k==='date'||k==='site') loadTrucks();
+}
 function tfield(k,v){
   TRUCK[k]=v;
   // only the button changes as the number is typed, so the keyboard stays up
@@ -1158,8 +1188,8 @@ var TACK = null;
 function openTack(keepMsg){
   SCREEN='tack';
   var it=byCode('05.02.02');
-  if(!TACK) TACK={date:'', site:'', litres:'', area:0, lines:[], rate:0.26,
-                  already:0, loaded:false, err:'', ok:''};
+  if(!TACK) TACK={date:DATA.today, site:'', litres:'', area:0, lines:[],
+                  rate:0.26, already:0, loaded:false, asked:false, err:'', ok:''};
   TACK.ok=keepMsg||'';
   document.getElementById('back').style.display='block';
   document.getElementById('back').onclick=function(){ TACK=null; renderHome(); };
@@ -1215,6 +1245,7 @@ function openTack(keepMsg){
   }
   h+='<button class="btn ghost" onclick="TACK=null;renderHome()">Done</button>';
   document.getElementById('view').innerHTML=h;
+  if(TACK.date && TACK.site && !TACK.asked){ TACK.asked=true; loadTack(); }
   armCamera('05.02.02', TACK.date, TACK.site, '', '', '');
 }
 
@@ -1231,7 +1262,10 @@ function kdateSettled(){
   openTack(TACK.ok); loadTack();
 }
 
-function kset(k,v){ TACK[k]=v; TACK.err=''; TACK.loaded=false; openTack(TACK.ok); loadTack(); }
+function kset(k,v){
+  TACK[k]=v; TACK.err=''; TACK.loaded=false;
+  openTack(TACK.ok); loadTack();
+}
 function kfield(k,v){ TACK[k]=v; openTack(TACK.ok); }
 
 function loadTack(){
