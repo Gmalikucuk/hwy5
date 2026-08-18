@@ -262,7 +262,7 @@ function newRunner(){
   ['getProgress','daySoFar','photoCount','photosFor','deletePhoto',
    'postEntry','postMeasurement','postDayTonnage','postEstimate','postPhoto',
    'postTruck','trucksToday','editEntry','coverage',
-   'tackForDay','postTack','saveDayDetails','dayDetails'].forEach(function(name){
+   'tackForDay','postTack','saveDayDetails','dayDetails','forecastBase'].forEach(function(name){
     r[name] = function(){
       var args = Array.prototype.slice.call(arguments);
       var payload = (args.length===1 && args[0] && typeof args[0]==='object')
@@ -1220,6 +1220,148 @@ function sendTruck(data){
     .postTruck(payload);
 }
 
+/* ----------------------------------------------------------- forecast modal
+   The superintendent's question, answered from the current lane's blocks: from
+   the last station, how much tonnage reaches a station, or what station a
+   tonnage reaches. The running weighted rate and average width come from the
+   blocks and seed the fields; either can be overridden. Nothing is written —
+   a simulated next block laid onto the end of the chain.                     */
+
+var FCAST = null;
+
+function openForecast(){
+  if(!AREA || !AREA.date || !AREA.site) return;
+  FCAST = {loading:true, base:null, rate:'', width:'', mode:'toStation',
+           tonnage:'', target:'', err:''};
+  drawForecast();
+  google.script.run.withSuccessHandler(function(res){
+    if(!FCAST) return;
+    FCAST.loading=false;
+    if(!res || !res.ok || !res.has){
+      FCAST.err = 'No blocks on this lane yet, so there is nothing to forecast from.';
+      drawForecast(); return;
+    }
+    FCAST.base = res;
+    // seed the overridable fields with the running figures
+    FCAST.rate = res.rate!=null ? String(res.rate) : (res.design!=null?String(res.design):'');
+    FCAST.width = res.avgWidth!=null ? String(res.avgWidth) : '';
+    drawForecast();
+  }).withFailureHandler(function(){
+    if(!FCAST) return;
+    FCAST.loading=false; FCAST.err='Could not read the lane. Try again.'; drawForecast();
+  }).forecastBase({code:AREA.code, date:AREA.date, site:AREA.site, code_:CODE});
+}
+
+function closeForecast(){ FCAST=null; var m=document.getElementById('fmod'); if(m) m.remove(); }
+function fmask(ev){ if(ev.target===ev.currentTarget) closeForecast(); }
+
+function fcalc(){
+  var b=FCAST.base; if(!b) return null;
+  var rate=Number(FCAST.rate), width=Number(FCAST.width);
+  if(!(rate>0) || !(width>0)) return null;
+  var start=b.lastStation;
+  if(FCAST.mode==='toStation'){
+    // given tonnage -> station reached
+    var t=Number(FCAST.tonnage); if(!(t>0)) return null;
+    var area=t*1000/rate;          // kg / (kg/m2) = m2
+    var len=area/width;            // m
+    return {kind:'toStation', len:len, area:area,
+            station:start+len, from:start};
+  }else{
+    // given target station -> tonnage needed
+    var tgt=Number(FCAST.target); if(FCAST.target==='' || !isFinite(tgt)) return null;
+    var len=Math.abs(tgt-start);
+    var area=len*width;
+    var t=area*rate/1000;          // m2 * kg/m2 / 1000 = tonnes
+    return {kind:'toTonnage', len:len, area:area, tonnes:t, from:start, target:tgt};
+  }
+}
+
+function drawForecast(){
+  if(!FCAST) return;
+  var h='<div class="mask" onclick="fmask(event)"><div class="msheet">'+
+        '<div class="mhead"><b>Forecast</b>'+
+        '<span class="mx" onclick="closeForecast()">\u00d7</span></div>';
+
+  if(FCAST.loading){
+    h+='<div class="center" style="padding:30px 0"><div class="spin"></div>Reading the lane\u2026</div>';
+    h+='</div></div>'; putForecast(h); return;
+  }
+  if(FCAST.err){
+    h+='<div class="err">'+esc(FCAST.err)+'</div></div></div>'; putForecast(h); return;
+  }
+
+  var b=FCAST.base;
+  // the running picture
+  h+='<div class="muted" style="margin-bottom:10px">'+esc(b.dir)+' '+esc(b.lane)+
+     '  \u00b7  now at <b style="color:var(--navy)">'+esc(staTxt(b.lastStation))+'</b></div>';
+  h+='<div class="calc" style="margin-bottom:12px"><div class="lab">Running so far</div>'+
+     '<div style="font-size:13px;line-height:1.6">'+
+     (b.rate!=null?'Rate <b>'+b.rate.toFixed(1)+' kg/m\u00b2</b>'+
+        (b.design?' \u00b7 <b>'+(b.rate/b.design*100).toFixed(1)+'%</b>':''):
+        'No block tonnages yet \u2014 rate unknown')+'<br>'+
+     (b.avgWidth!=null?'Average width <b>'+b.avgWidth.toFixed(2)+' m</b>':'')+
+     '</div></div>';
+
+  // overridable rate + width
+  h+='<div class="two">'+
+     '<div class="fld"><label>Rate (kg/m\u00b2)</label>'+
+     '<input type="number" inputmode="decimal" step="0.1" value="'+esc(FCAST.rate)+'" '+
+     'oninput="ffield(\'rate\',this.value)"></div>'+
+     '<div class="fld"><label>Average width (m)</label>'+
+     '<input type="number" inputmode="decimal" step="0.01" value="'+esc(FCAST.width)+'" '+
+     'oninput="ffield(\'width\',this.value)"></div></div>';
+
+  // which way round
+  h+='<div class="seg2" style="display:flex;gap:8px;margin:6px 0 12px">'+
+     '<button class="btn '+(FCAST.mode==='toStation'?'go':'ghost')+'" style="flex:1" '+
+     'onclick="fmode(\'toStation\')">Tonnage \u2192 station</button>'+
+     '<button class="btn '+(FCAST.mode==='toTonnage'?'go':'ghost')+'" style="flex:1" '+
+     'onclick="fmode(\'toTonnage\')">Station \u2192 tonnage</button></div>';
+
+  if(FCAST.mode==='toStation'){
+    h+='<div class="fld"><label>Tonnage to place</label>'+
+       '<input type="number" inputmode="decimal" step="0.01" value="'+esc(FCAST.tonnage)+'" '+
+       'placeholder="tonnes" oninput="ffield(\'tonnage\',this.value)"></div>';
+  }else{
+    h+='<div class="fld"><label>Target station</label>'+
+       '<input type="number" inputmode="numeric" value="'+esc(FCAST.target)+'" '+
+       'placeholder="e.g. 50000" oninput="ffield(\'target\',this.value)"></div>';
+  }
+
+  h+='<div id="f_out">'+forecastOut()+'</div>';
+  h+='</div></div>';
+  putForecast(h);
+}
+
+function forecastOut(){
+  var r=fcalc();
+  if(!r) return '<div class="note">Enter the figures above.</div>';
+  if(r.kind==='toStation'){
+    return '<div class="calc"><div class="lab">Reaches</div>'+
+      '<div class="val">'+esc(staTxt(Math.round(r.station)))+'</div>'+
+      '<div style="font-size:12px;color:var(--grey);margin-top:4px">'+
+      Math.round(r.len).toLocaleString()+' m further \u00b7 '+
+      Math.round(r.area).toLocaleString()+' m\u00b2 \u00b7 from '+esc(staTxt(r.from))+'</div></div>';
+  }
+  return '<div class="calc"><div class="lab">Tonnage needed</div>'+
+    '<div class="val">'+r.tonnes.toLocaleString(undefined,{maximumFractionDigits:1})+
+    '<small> t</small></div>'+
+    '<div style="font-size:12px;color:var(--grey);margin-top:4px">'+
+    Math.round(r.len).toLocaleString()+' m \u00b7 '+
+    Math.round(r.area).toLocaleString()+' m\u00b2 \u00b7 '+
+    esc(staTxt(r.from))+' to '+esc(staTxt(r.target))+'</div></div>';
+}
+
+function ffield(k,v){ FCAST[k]=v; var o=document.getElementById('f_out'); if(o) o.innerHTML=forecastOut(); }
+function fmode(m){ FCAST.mode=m; drawForecast(); }
+
+function putForecast(h){
+  var m=document.getElementById('fmod');
+  if(!m){ m=document.createElement('div'); m.id='fmod'; document.body.appendChild(m); }
+  m.innerHTML=h;
+}
+
 /* ----------------------------------------------------------- truck modal
    The same register as the Trucks screen, opened over the paving screen so a
    truck can be recorded without losing the measurement in hand. Day and site
@@ -1618,9 +1760,11 @@ function openArea(code, keepMsg){
        '<input type="text" value="'+esc(AREA.dnote)+'" '+
        'placeholder="Intersection at Brodie approach" oninput="afield(\'dnote\',this.value)"></div>';
     if(it.segTonnes){
-      h+='<div class="fld"><label>Tonnes on this one</label>'+
+      h+='<div class="fld"><label>Tonnes on this one'+
+         (it.blockOptional?' <span class="muted">(for the running rate)</span>':'')+'</label>'+
          '<input type="number" inputmode="decimal" step="0.01" value="'+esc(AREA.segT)+'" '+
-         'placeholder="what went in here" oninput="afield(\'segT\',this.value)"></div>';
+         'placeholder="'+(it.blockOptional?'off the tickets, if known':'what went in here')+'" '+
+         'oninput="afield(\'segT\',this.value)"></div>';
       h+='<div id="a_seg">'+segRateHtml(it)+'</div>';
     }
     h+='<div id="a_btn">'+buttonHtml()+'</div>';
@@ -1677,9 +1821,11 @@ function openArea(code, keepMsg){
          'different widths at each end</span></div>';
     }
     if(it.segTonnes){
-      h+='<div class="fld"><label>Tonnes on this one</label>'+
+      h+='<div class="fld"><label>Tonnes on this one'+
+         (it.blockOptional?' <span class="muted">(for the running rate)</span>':'')+'</label>'+
          '<input type="number" inputmode="decimal" step="0.01" value="'+esc(AREA.segT)+'" '+
-         'placeholder="what went in here" oninput="afield(\'segT\',this.value)"></div>';
+         'placeholder="'+(it.blockOptional?'off the tickets, if known':'what went in here')+'" '+
+         'oninput="afield(\'segT\',this.value)"></div>';
       h+='<div id="a_seg">'+segRateHtml(it)+'</div>';
     }
     h+='<div id="a_clash">'+clashHtml()+'</div>';
@@ -1695,7 +1841,12 @@ function openArea(code, keepMsg){
   if(ready() && it.paving){
     h+='<div style="text-align:center;margin:10px 0"><span class="muted" '+
        'style="text-decoration:underline" onclick="openTruckModal()">'+
-       'record a truck</span></div>';
+       'record a truck</span>';
+    // the forecast reads this lane's blocks, so it only makes sense on rated lifts
+    if(it.rated) h+='<span class="muted" style="margin:0 8px">\u00b7</span>'+
+       '<span class="muted" style="text-decoration:underline" onclick="openForecast()">'+
+       'forecast</span>';
+    h+='</div>';
   }
 
   if(ready() && (AREA.daySegs||[]).length){
@@ -1747,12 +1898,15 @@ function openArea(code, keepMsg){
        esc(shortDate(AREA.date))+'</button>'
        : '<button class="btn off">Save</button>';
   }
-  if(it.paving && it.segTonnes && ready()){
+  if(it.paving && it.closesFromBlocks && ready()){
     h+='<div class="note" style="margin-top:16px">Each measurement is saved with its '+
        'own tonnage, so there is nothing further to do at the end of the day.</div>';
   }
 
-  if(it.paving && !it.segTonnes && ready() && (AREA.dayArea>0 || AREA.segs.length)){
+  // the day close shows for paving items that do NOT close from their blocks
+  // (the top lifts: their blocks carry a working tonnage, but the day still
+  // closes on the entered Delivered / Placed figure)
+  if(it.paving && !it.closesFromBlocks && ready() && (AREA.dayArea>0 || AREA.segs.length)){
     h+='<div class="grp" style="margin-top:18px">Tonnage for the day</div>';
     if(AREA.confirming){
       h+=confirmHtml(it);
@@ -2679,7 +2833,7 @@ function segPreview(){
   if(AREA.s1===''||AREA.s2===''||AREA.w1==='') return {ok:false};
   if(!oneW && AREA.w2==='') return {ok:false};
   var itc=byCode(AREA.code);
-  if(itc&&itc.segTonnes&&!(Number(AREA.segT)>0))
+  if(itc&&itc.segTonnes&&!itc.blockOptional&&!(Number(AREA.segT)>0))
     return {ok:false, why:'Enter the tonnes on this one'};
   var s1=Number(AREA.s1), s2=Number(AREA.s2), w1=Number(AREA.w1);
   var w2=oneW? w1 : Number(AREA.w2);
