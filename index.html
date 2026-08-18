@@ -195,6 +195,17 @@
   .spin{width:22px;height:22px;border:2px solid #dcdcda;border-top-color:var(--navy);
     border-radius:50%;animation:sp .8s linear infinite;margin:0 auto 12px}
   @keyframes sp{to{transform:rotate(360deg)}}
+
+  /* the truck shortcut: a sheet over the current screen, so a truck can be
+     recorded without leaving the paving screen */
+  .mask{position:fixed;inset:0;background:rgba(20,25,40,.45);z-index:50;
+    display:flex;align-items:flex-end;justify-content:center}
+  .msheet{background:var(--card);width:100%;max-width:520px;border-radius:16px 16px 0 0;
+    padding:18px 16px calc(16px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto;
+    box-shadow:0 -6px 24px rgba(0,0,0,.18)}
+  .mhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .mhead b{font-size:17px}
+  .mx{font-size:26px;color:var(--grey);line-height:1;padding:0 6px}
 </style>
 
 <!-- Apps Script wrapped the page and supplied this; served directly, nothing
@@ -251,7 +262,7 @@ function newRunner(){
   ['getProgress','daySoFar','photoCount','photosFor','deletePhoto',
    'postEntry','postMeasurement','postDayTonnage','postEstimate','postPhoto',
    'postTruck','trucksToday','editEntry','coverage',
-   'tackForDay','postTack'].forEach(function(name){
+   'tackForDay','postTack','saveDayDetails','dayDetails'].forEach(function(name){
     r[name] = function(){
       var args = Array.prototype.slice.call(arguments);
       var payload = (args.length===1 && args[0] && typeof args[0]==='object')
@@ -548,6 +559,11 @@ function renderHome(){
        'H4a1 1 0 01-1-1V6zm11 4v3h5v-.5L17.1 10H14zM7.5 16.5a1 1 0 102 0 1 1 0 00-2 0zm7 0'+
        'a1 1 0 102 0 1 1 0 00-2 0z"/></svg>'+
        '<div class="t"><b>Trucks</b><span>photograph an arrival from the plant</span></div>'+
+       '<div class="arrow">\u203A</div></div>';
+    h+='<div class="tk" onclick="DAY=null;openDay()">'+
+       '<svg viewBox="0 0 24 24"><path d="M7 2v2M17 2v2M3.5 8h17M5 5h14a1 1 0 011 1v13a1 1 0 '+
+       '01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z"/><path d="M8 13h3M8 16h6"/></svg>'+
+       '<div class="t"><b>Day details</b><span>shift times and the plant lot</span></div>'+
        '<div class="arrow">\u203A</div></div>';
     h+='<div class="muted" style="text-align:center;margin-top:16px">'+
        'Updated '+esc(DATA.fetched)+'</div>';
@@ -1068,8 +1084,8 @@ var TRUCK = null;
 function openTrucks(){
   SCREEN='trucks';
   // a truck is photographed as it arrives, so the day is today
-  if(!TRUCK) TRUCK={date:DATA.today, site:todaySite(), truck:'', note:'',
-                    today:[], busy:false, loaded:false, err:'', ok:''};
+  if(!TRUCK) TRUCK={date:DATA.today, site:todaySite(), truck:'', tonnes:'', note:'',
+                    today:[], dayT:0, busy:false, loaded:false, err:'', ok:''};
   document.getElementById('back').style.display='block';
   document.getElementById('back').onclick=function(){ TRUCK=null; renderHome(); };
   document.getElementById('title').textContent='Trucks';
@@ -1092,6 +1108,9 @@ function openTrucks(){
     h+='<div class="fld"><label>Truck number</label>'+
        '<input type="text" id="t_no" value="'+esc(TRUCK.truck)+'" '+
        'placeholder="as it is on the truck" oninput="tfield(\'truck\',this.value)"></div>';
+    h+='<div class="fld"><label>Tonnes on the truck</label>'+
+       '<input type="number" inputmode="decimal" step="0.01" id="t_t" value="'+esc(TRUCK.tonnes)+'" '+
+       'placeholder="off the scale ticket" oninput="tfield(\'tonnes\',this.value)"></div>';
     h+='<div class="fld"><label>Note (optional)</label>'+
        '<input type="text" value="'+esc(TRUCK.note)+'" '+
        'placeholder="anything worth saying" oninput="tfield(\'note\',this.value)"></div>';
@@ -1100,16 +1119,29 @@ function openTrucks(){
         (TRUCK.busy?'Saving\u2026':'Photograph and save to '+esc(shortDate(TRUCK.date)))+
         '</button>'
       : '<button class="btn off">Photograph and record arrival</button>';
+    // a truck can dump and leave before a photo is taken; it still needs
+    // recording, so offer a plain save with no picture
+    if(TRUCK.truck.trim() && !TRUCK.busy){
+      h+='<div style="text-align:center;margin:8px 0"><span class="muted" '+
+         'style="text-decoration:underline" onclick="sendTruck(\'\')">'+
+         'record without a photo</span></div>';
+    }
     h+='<div class="note" style="margin-top:8px">The time of arrival is taken '+
-       'when the photograph is saved.</div>';
+       'when it is saved.</div>';
   }
 
   if((TRUCK.today||[]).length){
-    h+='<div class="grp" style="margin-top:18px">Arrived today  \u00b7  '+
-       TRUCK.today.length+'</div><div class="pts">';
+    var dt = TRUCK.dayT||0;
+    h+='<div class="grp" style="margin-top:18px">Today so far  \u00b7  '+
+       TRUCK.today.length+' truck'+(TRUCK.today.length===1?'':'s')+
+       (dt>0?'  \u00b7  '+dt.toLocaleString(undefined,{maximumFractionDigits:1})+' t':'')+
+       '</div><div class="pts">';
     TRUCK.today.forEach(function(t){
       h+='<div class="pt"><div class="txt" style="flex:1;min-width:0">'+
-         '<div style="font-weight:600">'+esc(t.truck)+'</div>'+
+         '<div style="font-weight:600">'+esc(t.truck)+
+         (t.tonnes!=null?'  <span style="font-weight:400;color:var(--grey)">'+
+           Number(t.tonnes).toLocaleString(undefined,{maximumFractionDigits:1})+' t</span>':'')+
+         '</div>'+
          (t.note?'<div style="font-size:12px;color:var(--grey)">'+esc(t.note)+'</div>':'')+
          '</div><div class="a">'+esc(t.at)+'</div></div>';
     });
@@ -1142,7 +1174,8 @@ function tset(k,v){
 }
 function tfield(k,v){
   TRUCK[k]=v;
-  // only the button changes as the number is typed, so the keyboard stays up
+  // only the button reacts, so neither the truck nor the tonnage field
+  // redraws mid-type and drops the keyboard
   if(k==='truck') openTrucks();
 }
 
@@ -1151,7 +1184,9 @@ function loadTrucks(){
   var d=TRUCK.date, st=TRUCK.site;
   google.script.run.withSuccessHandler(function(list){
     if(!TRUCK||TRUCK.date!==d||TRUCK.site!==st) return;
-    TRUCK.today=list||[]; openTrucks();
+    TRUCK.today=list||[];
+    TRUCK.dayT=(list||[]).reduce(function(a,t){ return a+(Number(t.tonnes)||0); },0);
+    openTrucks();
   }).withFailureHandler(function(){}).trucksToday(d, st, CODE);
 }
 
@@ -1165,23 +1200,214 @@ function truckPhoto(){
 function sendTruck(data){
   TRUCK.busy=true; openTrucks();
   var payload={code_:CODE, date:TRUCK.date, site:TRUCK.site, truck:TRUCK.truck.trim(),
-               item:'', note:TRUCK.note, data:data};
+               tonnes:(TRUCK.tonnes===''?'':TRUCK.tonnes), item:'', note:TRUCK.note, data:data};
   google.script.run
     .withSuccessHandler(function(res){
       TRUCK.busy=false;
       if(!res.ok){ TRUCK.err=res.message; openTrucks(); return; }
       TRUCK.ok='Truck '+res.truck+' recorded at '+res.at;
-      TRUCK.truck=''; TRUCK.note=''; TRUCK.err='';
+      TRUCK.truck=''; TRUCK.tonnes=''; TRUCK.note=''; TRUCK.err='';
+      if(res.dayTonnes!=null) TRUCK.dayT=res.dayTonnes;
       openTrucks(); loadTrucks();
     })
     .withFailureHandler(function(){
       TRUCK.busy=false;
       enqueue('postTruck', payload, 'truck '+payload.truck);
       TRUCK.ok='Truck '+payload.truck+' held on this phone.';
-      TRUCK.truck=''; TRUCK.note='';
+      TRUCK.truck=''; TRUCK.tonnes=''; TRUCK.note='';
       openTrucks();
     })
     .postTruck(payload);
+}
+
+/* ----------------------------------------------------------- truck modal
+   The same register as the Trucks screen, opened over the paving screen so a
+   truck can be recorded without losing the measurement in hand. Day and site
+   come from the paving screen; the record is the day-and-site total exactly as
+   the Trucks screen makes it, not tied to the pay item.                     */
+
+var TMOD = null;
+
+function openTruckModal(){
+  if(!AREA || !AREA.date || !AREA.site) return;
+  TMOD = {date:AREA.date, site:AREA.site, truck:'', tonnes:'', note:'',
+          busy:false, err:'', ok:''};
+  drawTruckModal();
+}
+
+function closeTruckModal(){ TMOD=null; var m=document.getElementById('tmod'); if(m) m.remove(); }
+
+function maskTap(ev){ if(ev.target===ev.currentTarget) closeTruckModal(); }
+
+function drawTruckModal(){
+  if(!TMOD) return;
+  var h='<div class="mask" onclick="maskTap(event)">'+
+        '<div class="msheet">'+
+        '<div class="mhead"><b>Record a truck</b>'+
+        '<span class="mx" onclick="closeTruckModal()">\u00d7</span></div>';
+  if(TMOD.ok) h+='<div class="ok">'+esc(TMOD.ok)+'</div>';
+  if(TMOD.err) h+='<div class="err">'+esc(TMOD.err)+'</div>';
+  h+='<div class="muted" style="margin-bottom:10px">'+esc(shortDate(TMOD.date))+
+     '  \u00b7  '+esc(TMOD.site)+'</div>';
+  h+='<div class="fld"><label>Truck number</label>'+
+     '<input type="text" id="tm_no" value="'+esc(TMOD.truck)+'" '+
+     'placeholder="as it is on the truck" oninput="tmField(\'truck\',this.value)"></div>';
+  h+='<div class="fld"><label>Tonnes on the truck</label>'+
+     '<input type="number" inputmode="decimal" step="0.01" value="'+esc(TMOD.tonnes)+'" '+
+     'placeholder="off the scale ticket" oninput="tmField(\'tonnes\',this.value)"></div>';
+  h+='<div class="fld"><label>Note (optional)</label>'+
+     '<input type="text" value="'+esc(TMOD.note)+'" '+
+     'placeholder="anything worth saying" oninput="tmField(\'note\',this.value)"></div>';
+  h+= TMOD.truck.trim()
+    ? '<button class="btn save" onclick="tmPhoto()">'+
+      (TMOD.busy?'Saving\u2026':'Photograph and save')+'</button>'
+    : '<button class="btn off">Photograph and record arrival</button>';
+  if(TMOD.truck.trim() && !TMOD.busy){
+    h+='<div style="text-align:center;margin:8px 0"><span class="muted" '+
+       'style="text-decoration:underline" onclick="tmSend(\'\')">'+
+       'record without a photo</span></div>';
+  }
+  h+='</div></div>';
+
+  var m=document.getElementById('tmod');
+  if(!m){ m=document.createElement('div'); m.id='tmod'; document.body.appendChild(m); }
+  m.innerHTML=h;
+}
+
+function tmField(k,v){ TMOD[k]=v; if(k==='truck') drawTruckModal(); }
+
+function tmPhoto(){
+  if(TMOD.busy || !TMOD.truck.trim()) return;
+  var el=document.getElementById('camIn');
+  if(!el) return;
+  el.value=''; el.setAttribute('data-for','tmod'); el.click();
+}
+
+function tmSend(data){
+  TMOD.busy=true; drawTruckModal();
+  var payload={code_:CODE, date:TMOD.date, site:TMOD.site, truck:TMOD.truck.trim(),
+               tonnes:(TMOD.tonnes===''?'':TMOD.tonnes), item:'', note:TMOD.note, data:data};
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!TMOD) return;
+      TMOD.busy=false;
+      if(!res.ok){ TMOD.err=res.message; drawTruckModal(); return; }
+      // keep the Trucks screen total in step if it is loaded
+      if(TRUCK && TRUCK.date===TMOD.date && TRUCK.site===TMOD.site) loadTrucks();
+      closeTruckModal();
+      AREA.ok='Truck '+res.truck+' recorded at '+res.at+'.';
+      openArea(AREA.code, AREA.ok);
+    })
+    .withFailureHandler(function(){
+      if(!TMOD) return;
+      TMOD.busy=false;
+      enqueue('postTruck', payload, 'truck '+payload.truck);
+      closeTruckModal();
+      AREA.ok='Truck '+payload.truck+' held on this phone.';
+      openArea(AREA.code, AREA.ok);
+    })
+    .postTruck(payload);
+}
+
+/* -------------------------------------------------------------- day details
+   The two shift windows and the plant lot for the day. Barrier crew and the
+   paving crew keep different hours, so each has its own start and finish. The
+   lot is asked once: the whole day's asphalt comes from it.                 */
+
+var DAY = null;
+
+function openDay(){
+  SCREEN='day';
+  if(!DAY) DAY={date:DATA.today, start:'', finish:'', barrierStart:'', barrierFinish:'',
+                lot:'', loaded:false, busy:false, err:'', ok:''};
+  document.getElementById('back').style.display='block';
+  document.getElementById('back').onclick=function(){ DAY=null; renderHome(); };
+  document.getElementById('title').textContent='Day details';
+  var a=document.getElementById('act'); a.textContent=''; a.onclick=null;
+
+  var h='';
+  if(DAY.ok) h+='<div class="ok">'+esc(DAY.ok)+'</div>';
+  if(DAY.err) h+='<div class="err">'+esc(DAY.err)+'</div>';
+
+  h+='<div class="fld"><label>Date</label><input type="date" value="'+esc(DAY.date)+'" '+
+     'onchange="ddateChanged(this.value)" onblur="ddateSettled()"></div>';
+
+  h+='<div class="grp" style="margin-top:6px">Paving / other crew</div>';
+  h+='<div class="two">'+
+     '<div class="fld"><label>Start</label>'+
+     '<input type="time" value="'+esc(DAY.start)+'" onchange="dfield(\'start\',this.value)"></div>'+
+     '<div class="fld"><label>Finish</label>'+
+     '<input type="time" value="'+esc(DAY.finish)+'" onchange="dfield(\'finish\',this.value)"></div></div>';
+
+  h+='<div class="grp" style="margin-top:10px">Barrier crew</div>';
+  h+='<div class="two">'+
+     '<div class="fld"><label>Start</label>'+
+     '<input type="time" value="'+esc(DAY.barrierStart)+'" onchange="dfield(\'barrierStart\',this.value)"></div>'+
+     '<div class="fld"><label>Finish</label>'+
+     '<input type="time" value="'+esc(DAY.barrierFinish)+'" onchange="dfield(\'barrierFinish\',this.value)"></div></div>';
+
+  h+='<div class="grp" style="margin-top:10px">Plant lot</div>';
+  h+='<div class="fld"><label>Lot number for the day</label>'+
+     '<input type="text" value="'+esc(DAY.lot)+'" placeholder="as the plant gave it" '+
+     'oninput="dfield(\'lot\',this.value)"></div>';
+  h+='<div class="note">The whole day\u2019s asphalt is from this lot. It shows once, '+
+     'at the top of the application rate file.</div>';
+
+  h+= DAY.date
+    ? '<button class="btn save" onclick="saveDay()">'+
+      (DAY.busy?'Saving\u2026':'Save to '+esc(shortDate(DAY.date)))+'</button>'
+    : '<button class="btn off">Save</button>';
+  h+='<button class="btn ghost" onclick="DAY=null;renderHome()">Done</button>';
+
+  document.getElementById('view').innerHTML=h;
+  armCamera('', '', '');
+  if(DAY.date && !DAY.loaded){ DAY.loaded=true; loadDay2(); }
+}
+
+function dfield(k,v){ DAY[k]=v; DAY.err=''; }   // no redraw: keep the picker open
+
+function ddateChanged(v){
+  if(!DAY) return;
+  DAY.date=v; DAY.err=''; DAY.loaded=false;
+  if(ddateTimer) clearTimeout(ddateTimer);
+  ddateTimer=setTimeout(ddateSettled, 600);
+}
+var ddateTimer=null;
+function ddateSettled(){
+  if(ddateTimer){ clearTimeout(ddateTimer); ddateTimer=null; }
+  if(!DAY) return;
+  DAY.loaded=false; openDay(); loadDay2();
+}
+
+/** Bring back whatever is already saved for the day, so it can be adjusted. */
+function loadDay2(){
+  if(!DAY||!DAY.date) return;
+  var d=DAY.date;
+  google.script.run.withSuccessHandler(function(res){
+    if(!DAY||DAY.date!==d||!res||!res.ok) return;
+    DAY.start=res.start||''; DAY.finish=res.finish||'';
+    DAY.barrierStart=res.barrierStart||''; DAY.barrierFinish=res.barrierFinish||'';
+    DAY.lot=res.lot||'';
+    openDay();
+  }).withFailureHandler(function(){}).dayDetails(d, CODE);
+}
+
+function saveDay(){
+  if(DAY.busy || !DAY.date) return;
+  DAY.busy=true; openDay();
+  var payload={code_:CODE, date:DAY.date, start:DAY.start, finish:DAY.finish,
+               barrierStart:DAY.barrierStart, barrierFinish:DAY.barrierFinish, lot:DAY.lot};
+  google.script.run.withSuccessHandler(function(res){
+    DAY.busy=false;
+    if(!res||!res.ok){ DAY.err=(res&&res.message)||'Could not save.'; openDay(); return; }
+    DAY.ok='Saved'+(res.saved?' \u2014 '+res.saved:'')+'.';
+    openDay();
+  }).withFailureHandler(function(){
+    DAY.busy=false;
+    enqueue('saveDayDetails', payload, 'day details '+DAY.date);
+    DAY.ok='Held on this phone.';
+    openDay();
+  }).saveDayDetails(payload);
 }
 
 /* -------------------------------------------------------------- tack coat
@@ -1346,12 +1572,13 @@ function openArea(code, keepMsg){
     var d = DRAFTS[code];
     AREA = d
       ? {code:code, date:d.date, site:d.site, dir:d.dir, lane:d.lane||'',
-         segs:d.segs||[], mode:'sta', s1:d.s1||'', w1:d.w1||'', s2:'', w2:d.w2||'',
+         segs:d.segs||[], mode:'sta', twoW:!!d.twoW, anchored:!!d.anchored, confirmDrop:-1,
+         s1:d.s1||'', w1:d.w1||'', s2:'', w2:d.w2||'',
          darea:'', dnote:'', tonnes:d.tonnes||'', at:'', atw:'',
          dayArea:0, dayTonnes:0, daySegs:[], err:'', ok:''}
       : {code:code, date:'',
          site:(it.sites&&it.sites.length===1)?it.sites[0]:'',
-         dir:'', lane:'', segs:[], mode:'sta',
+         dir:'', lane:'', segs:[], mode:'sta', twoW:false, anchored:false, confirmDrop:-1,
          s1:'', w1:'', s2:'', w2:'', darea:'', dnote:'',
          tonnes:'', segT:'', lift:'', at:'', atw:'', confirming:false,
          endT:'', endAt:'', endW:'', closed:null, closedArea:0,
@@ -1399,21 +1626,55 @@ function openArea(code, keepMsg){
     h+='<div style="text-align:center;margin:10px 0"><span class="muted" '+
        'style="text-decoration:underline" onclick="aset(\'mode\',\'sta\')">'+
        'measure by stations instead</span></div>';
+  }else if(!AREA.anchored && AREA.segs.length===0){
+    // Where the day's run begins. Set once; it becomes the first segment's
+    // from-station, and every stretch after carries on from the one before,
+    // so the start is entered a single time and cannot disagree with itself.
+    h+='<div class="fld"><label>Start station \u2014 where today\u2019s run begins</label>'+
+       '<input type="number" inputmode="numeric" id="g_anchor" value="'+esc(AREA.s1)+'" '+
+       'placeholder="e.g. 54730" oninput="afield(\'s1\',this.value)"></div>';
+    h+='<div id="a_anchor">'+anchorBtnHtml()+'</div>';
+    h+='<div class="note">You enter this once. Each stretch after picks up where '+
+       'the last one ended.</div>';
   }else{
-    h+='<div class="two">'+
-       '<div class="fld"><label>From station</label>'+
-       '<input type="number" inputmode="numeric" id="g_s1" value="'+esc(AREA.s1)+'" '+
-       'placeholder="11800" oninput="afield(\'s1\',this.value)"></div>'+
-       '<div class="fld"><label>Width there (m)</label>'+
-       '<input type="number" inputmode="decimal" step="0.01" id="g_w1" value="'+esc(AREA.w1)+'" '+
-       'placeholder="9.00" oninput="afield(\'w1\',this.value)"></div></div>';
-    h+='<div class="two">'+
-       '<div class="fld"><label>To station</label>'+
-       '<input type="number" inputmode="numeric" id="g_s2" value="'+esc(AREA.s2)+'" '+
-       'placeholder="13200" oninput="afield(\'s2\',this.value)"></div>'+
-       '<div class="fld"><label>Width there (m)</label>'+
-       '<input type="number" inputmode="decimal" step="0.01" id="g_w2" value="'+esc(AREA.w2)+'" '+
-       'placeholder="9.00" oninput="afield(\'w2\',this.value)"></div></div>';
+    // The block model: from station, to station, one width between them.
+    // Two widths are there for a genuinely tapered stretch, but the common
+    // case is a single width, so that is the default.
+    if(AREA.twoW){
+      h+='<div class="two">'+
+         '<div class="fld"><label>From station</label>'+
+         '<input type="number" inputmode="numeric" id="g_s1" value="'+esc(AREA.s1)+'" '+
+         'placeholder="11800" oninput="afield(\'s1\',this.value)"></div>'+
+         '<div class="fld"><label>Width there (m)</label>'+
+         '<input type="number" inputmode="decimal" step="0.01" id="g_w1" value="'+esc(AREA.w1)+'" '+
+         'placeholder="9.00" oninput="afield(\'w1\',this.value)"></div></div>';
+      h+='<div class="two">'+
+         '<div class="fld"><label>To station</label>'+
+         '<input type="number" inputmode="numeric" id="g_s2" value="'+esc(AREA.s2)+'" '+
+         'placeholder="13200" oninput="afield(\'s2\',this.value)"></div>'+
+         '<div class="fld"><label>Width there (m)</label>'+
+         '<input type="number" inputmode="decimal" step="0.01" id="g_w2" value="'+esc(AREA.w2)+'" '+
+         'placeholder="9.00" oninput="afield(\'w2\',this.value)"></div></div>';
+      h+='<div style="text-align:center;margin:6px 0"><span class="muted" '+
+         'style="text-decoration:underline" onclick="aset(\'twoW\',false)">'+
+         'same width throughout</span></div>';
+    }else{
+      var fromLabel = (AREA.anchored || AREA.segs.length)
+        ? 'From station \u00b7 continuing' : 'From station';
+      h+='<div class="two">'+
+         '<div class="fld"><label>'+fromLabel+'</label>'+
+         '<input type="number" inputmode="numeric" id="g_s1" value="'+esc(AREA.s1)+'" '+
+         'placeholder="11800" oninput="afield(\'s1\',this.value)"></div>'+
+         '<div class="fld"><label>To station</label>'+
+         '<input type="number" inputmode="numeric" id="g_s2" value="'+esc(AREA.s2)+'" '+
+         'placeholder="13200" oninput="afield(\'s2\',this.value)"></div></div>';
+      h+='<div class="fld"><label>Width between them (m)</label>'+
+         '<input type="number" inputmode="decimal" step="0.01" id="g_w1" value="'+esc(AREA.w1)+'" '+
+         'placeholder="9.00" oninput="afield(\'w1\',this.value)"></div>';
+      h+='<div style="text-align:center;margin:6px 0"><span class="muted" '+
+         'style="text-decoration:underline" onclick="aset(\'twoW\',true)">'+
+         'different widths at each end</span></div>';
+    }
     if(it.segTonnes){
       h+='<div class="fld"><label>Tonnes on this one</label>'+
          '<input type="number" inputmode="decimal" step="0.01" value="'+esc(AREA.segT)+'" '+
@@ -1428,6 +1689,13 @@ function openArea(code, keepMsg){
   }
 
   if(ready()) h+=shotsHtml();
+
+  // a truck can be recorded from here without leaving the measurement in hand
+  if(ready() && it.paving){
+    h+='<div style="text-align:center;margin:10px 0"><span class="muted" '+
+       'style="text-decoration:underline" onclick="openTruckModal()">'+
+       'record a truck</span></div>';
+  }
 
   if(ready() && (AREA.daySegs||[]).length){
     h+='<div class="grp" style="margin-top:16px">Today so far</div>';
@@ -1456,18 +1724,22 @@ function openArea(code, keepMsg){
     // newest at the top, matching the saved list below it
     for(var i=AREA.segs.length-1;i>=0;i--){
       var g=AREA.segs[i];
+      var confirming = (AREA.confirmDrop===i);
       h+='<div class="pt"><div class="n">'+(i+1)+'</div>'+
-         '<div class="txt" style="flex:1;min-width:0">'+
+         '<div class="txt" style="flex:1;min-width:0" onclick="editSeg('+i+')">'+
          (g.kind==='desc'
            ? '<div style="font-weight:600">'+esc(g.note)+'</div>'+
-             '<div style="font-size:12px;color:var(--grey)">no stations</div>'
+             '<div style="font-size:12px;color:var(--grey)">no stations · tap to change</div>'
            : '<div style="font-weight:600">'+esc(staTxt(g.s1))+' → '+esc(staTxt(g.s2))+'</div>'+
              '<div style="font-size:12px;color:var(--grey)">'+
              Number(g.w1).toFixed(2)+' / '+Number(g.w2).toFixed(2)+' m · '+
              Math.abs(g.s2-g.s1).toLocaleString()+' m'+
-             (g.tonnes?' · '+g.tonnes.toLocaleString()+' t':'')+'</div>')+'</div>'+
+             (g.tonnes?' · '+g.tonnes.toLocaleString()+' t':'')+' · tap to change</div>')+'</div>'+
          '<div class="a">'+g.area.toLocaleString(undefined,{maximumFractionDigits:1})+' m²</div>'+
-         '<div class="x" onclick="dropSeg('+i+')">&times;</div></div>';
+         (confirming
+           ? '<div class="x" style="color:var(--red);font-weight:700;font-size:13px" '+
+             'onclick="dropSeg('+i+')">remove?</div>'
+           : '<div class="x" onclick="askDropSeg('+i+')">&times;</div>')+'</div>';
     }
     h+='</div>';
     h+= ready() ? '<button class="btn save" onclick="submitArea()">Save to '+
@@ -1558,8 +1830,10 @@ function aset(k,v){
     items through the day and confirm each one when it suits. */
 function keepDraft(){
   if(!AREA) return;
-  if(AREA.segs.length===0){ delete DRAFTS[AREA.code]; }
-  else DRAFTS[AREA.code] = {date:AREA.date, site:AREA.site, dir:AREA.dir, lane:AREA.lane,
+  // a set anchor is worth keeping even before the first stretch is measured,
+  // so leaving and coming back does not lose where the day began
+  if(AREA.segs.length===0 && !AREA.anchored){ delete DRAFTS[AREA.code]; }
+  else DRAFTS[AREA.code] = {anchored:AREA.anchored, date:AREA.date, site:AREA.site, dir:AREA.dir, lane:AREA.lane,
                             mode:AREA.mode, tonnes:AREA.tonnes,
                             segs:AREA.segs, s1:AREA.s1, w1:AREA.w1, w2:AREA.w2};
   saveDrafts();
@@ -1589,6 +1863,7 @@ function afield(k,v){
   var e3=document.getElementById('a_endbtn');
   if(e3) e3.innerHTML=endBtnHtml();
   var b=document.getElementById('a_btn');  if(b) b.innerHTML=buttonHtml();
+  var an=document.getElementById('a_anchor'); if(an) an.innerHTML=anchorBtnHtml();
   if(k==='tonnes'||k==='segT'||k==='at'||k==='atw'||
      k==='endT'||k==='endAt'||k==='endW') keepDraft();
   if(k==='s1'||k==='s2'||k==='dnote') PHOTO.where=areaWhere();
@@ -1737,9 +2012,11 @@ function takePhoto(){
 function photoPicked(input){
   var file = input.files && input.files[0];
   if(!file) return;
-  var forTruck = input.getAttribute && input.getAttribute('data-for')==='truck';
+  var target = (input.getAttribute && input.getAttribute('data-for')) || '';
+  var forTruck = target==='truck';
+  var forModal = target==='tmod';
   if(input.setAttribute) input.setAttribute('data-for','');
-  if(!forTruck){ PHOTO.busy=true; showCam(true); }
+  if(!forTruck && !forModal){ PHOTO.busy=true; showCam(true); }
   var reader=new FileReader();
   reader.onload=function(ev){
     var img=new Image();
@@ -1749,7 +2026,7 @@ function photoPicked(input){
       var cv=document.createElement('canvas'); cv.width=w; cv.height=h;
       cv.getContext('2d').drawImage(img,0,0,w,h);
       var out = cv.toDataURL('image/jpeg',0.72);
-      if(forTruck) sendTruck(out); else sendPhoto(out);
+      if(forModal) tmSend(out); else if(forTruck) sendTruck(out); else sendPhoto(out);
     };
     img.onerror=function(){ PHOTO.busy=false; showCam(true); };
     img.src=ev.target.result;
@@ -2334,18 +2611,22 @@ function segPreview(){
             note:String(AREA.dnote).trim()};
   }
   if(!AREA.lane) return {ok:false, why:'Choose a lane'};
-  if(AREA.s1===''||AREA.s2===''||AREA.w1===''||AREA.w2==='') return {ok:false};
+  var oneW = !AREA.twoW;
+  if(AREA.s1===''||AREA.s2===''||AREA.w1==='') return {ok:false};
+  if(!oneW && AREA.w2==='') return {ok:false};
   var itc=byCode(AREA.code);
   if(itc&&itc.segTonnes&&!(Number(AREA.segT)>0))
     return {ok:false, why:'Enter the tonnes on this one'};
-  var s1=Number(AREA.s1), s2=Number(AREA.s2), w1=Number(AREA.w1), w2=Number(AREA.w2);
+  var s1=Number(AREA.s1), s2=Number(AREA.s2), w1=Number(AREA.w1);
+  var w2=oneW? w1 : Number(AREA.w2);
   if(!isFinite(s1)||!isFinite(s2)||!isFinite(w1)||!isFinite(w2)) return {ok:false};
   if(s1===s2) return {ok:false, why:'Same station twice'};
   if(w1<=0||w2<=0) return {ok:false, why:'Width must be more than zero'};
   var len=Math.abs(s2-s1);
   var area=Math.round((w1+w2)/2*len*100)/100;
-  var note=staTxt(s1)+' to '+staTxt(s2)+' · '+len.toLocaleString()+' m · avg '+
-           ((w1+w2)/2).toFixed(2)+' m';
+  var note=staTxt(s1)+' to '+staTxt(s2)+' · '+len.toLocaleString()+' m · '+
+           (oneW ? w1.toFixed(2)+' m wide'
+                 : 'avg '+((w1+w2)/2).toFixed(2)+' m');
   var itr=byCode(AREA.code);
   if(overlaps(s1,s2) && !AREA.allowOverlap && !(itr && itr.repeats))
     return {ok:false, why:'Already covered today in this lane', clash:true,
@@ -2376,7 +2657,23 @@ function areaTotal(){
   return Math.round(t*100)/100;
 }
 
+function anchorBtnHtml(){
+  return (AREA.s1!=='' && isFinite(Number(AREA.s1)))
+    ? '<button class="btn save" onclick="setAnchor()">Start here \u2014 '+esc(staTxt(Number(AREA.s1)))+'</button>'
+    : '<button class="btn off">Enter the start station</button>';
+}
+
+function setAnchor(){
+  // fix the day's start; it becomes the first segment's from-station and the
+  // chain carries on from there. Editable still, in case a stretch is corrected.
+  var v=Number(AREA.s1);
+  if(AREA.s1==='' || !isFinite(v)){ AREA.err='Enter the start station.'; openArea(AREA.code, AREA.ok); return; }
+  AREA.anchored=true; AREA.err=''; keepDraft(); openArea(AREA.code, AREA.ok);
+}
+
+
 function addSeg(){
+  AREA.confirmDrop=-1;   // any new action clears a pending remove
   // the button is inactive unless this passes, so nothing needs saying here
   if(!segPreview().ok) return;
   if(AREA.mode==='desc'){
@@ -2387,20 +2684,52 @@ function addSeg(){
     keepDraft(); openArea(AREA.code, AREA.ok);
     return;
   }
-  var s1=Number(AREA.s1), s2=Number(AREA.s2), w1=Number(AREA.w1), w2=Number(AREA.w2);
+  var oneW=!AREA.twoW;
+  var s1=Number(AREA.s1), s2=Number(AREA.s2), w1=Number(AREA.w1);
+  var w2=oneW? w1 : Number(AREA.w2);
   var len=Math.abs(s2-s1);
   AREA.segs.push({kind:'sta',s1:s1,w1:w1,s2:s2,w2:w2,
                   area:Math.round((w1+w2)/2*len*100)/100,
                   tonnes:AREA.segT===''?null:Number(AREA.segT)});
   AREA.segT='';
-  // the next stretch usually carries on from here
-  AREA.s1=s2; AREA.w1=w2; AREA.s2=''; AREA.w2=w2;
+  // the next stretch usually carries on from here, at the same width
+  AREA.s1=s2; AREA.w1=(oneW? w1 : w2); AREA.s2=''; AREA.w2=(oneW? '' : w2);
   AREA.err=''; AREA.allowOverlap=false;   // one exception, not a standing licence
   keepDraft();
   openArea(AREA.code, AREA.ok);
 }
 
-function dropSeg(i){ AREA.segs.splice(i,1); AREA.err=''; keepDraft(); openArea(AREA.code, AREA.ok); }
+/** First tap on the X asks; the second, now labelled "remove?", does it. */
+function askDropSeg(i){ AREA.confirmDrop=i; openArea(AREA.code, AREA.ok); }
+
+function dropSeg(i){ AREA.segs.splice(i,1); AREA.err='';
+  AREA.confirmDrop=-1;
+  if(AREA.segs.length===0) AREA.anchored=false;   // start fresh if all cleared
+  keepDraft(); openArea(AREA.code, AREA.ok); }
+
+/**
+ * Correct a staged stretch without losing it. Its values go back into the
+ * fields, and it is taken off the list; measuring it again replaces it. The
+ * chain still carries, because the from-station is loaded too.
+ */
+function editSeg(i){
+  var g=AREA.segs[i];
+  if(!g) return;
+  AREA.confirmDrop=-1;
+  if(g.kind==='desc'){
+    AREA.mode='desc'; AREA.darea=String(g.area); AREA.dnote=g.note||'';
+    if(g.tonnes!=null) AREA.segT=String(g.tonnes);
+  }else{
+    AREA.mode='sta';
+    AREA.twoW=(g.w2!==g.w1);
+    AREA.s1=String(g.s1); AREA.s2=String(g.s2);
+    AREA.w1=String(g.w1); AREA.w2=String(g.w2);
+    if(g.tonnes!=null) AREA.segT=String(g.tonnes);
+  }
+  AREA.segs.splice(i,1);
+  AREA.anchored=true;   // editing implies the run has begun
+  AREA.err=''; keepDraft(); openArea(AREA.code, 'Correcting a stretch \u2014 change it and save again.');
+}
 
 function submitArea(){
   document.getElementById('view').innerHTML=
