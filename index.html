@@ -1575,13 +1575,14 @@ function openArea(code, keepMsg){
          segs:d.segs||[], mode:'sta', twoW:!!d.twoW, anchored:!!d.anchored, confirmDrop:-1,
          s1:d.s1||'', w1:d.w1||'', s2:'', w2:d.w2||'',
          darea:'', dnote:'', tonnes:d.tonnes||'', at:'', atw:'',
+         endT:'', endD:'', hasLeft:false,
          dayArea:0, dayTonnes:0, daySegs:[], err:'', ok:''}
       : {code:code, date:'',
          site:(it.sites&&it.sites.length===1)?it.sites[0]:'',
          dir:'', lane:'', segs:[], mode:'sta', twoW:false, anchored:false, confirmDrop:-1,
          s1:'', w1:'', s2:'', w2:'', darea:'', dnote:'',
          tonnes:'', segT:'', lift:'', at:'', atw:'', confirming:false,
-         endT:'', endAt:'', endW:'', closed:null, closedArea:0,
+         endT:'', endD:'', hasLeft:false, endAt:'', endW:'', closed:null, closedArea:0,
          dayArea:0, dayTonnes:0, daySegs:[], err:'', ok:''};
   }
   AREA.ok = keepMsg||'';
@@ -1769,9 +1770,25 @@ function openArea(code, keepMsg){
                   : ' Saving again replaces that figure.')+
            '</div>';
       }
-      h+='<div class="fld"><label>Total tonnage for the day</label>'+
-         '<input type="number" inputmode="decimal" step="0.01" value="'+esc(AREA.endT)+'" '+
-         'placeholder="off the tickets" oninput="afield(\'endT\',this.value)"></div>';
+      // Delivered is the tickets total. Placed is what went down and drives the
+      // rate; if nothing is left over, Placed equals Delivered and only this one
+      // field is needed. The "some was left over" line opens the split.
+      h+='<div class="fld"><label>Delivered \u2014 total off the tickets</label>'+
+         '<input type="number" inputmode="decimal" step="0.01" value="'+esc(AREA.endD)+'" '+
+         'placeholder="off the tickets" oninput="afield(\'endD\',this.value)"></div>';
+      if(!AREA.hasLeft){
+        h+='<div style="text-align:center;margin:4px 0 10px"><span class="muted" '+
+           'style="text-decoration:underline" onclick="aset(\'hasLeft\',true)">'+
+           'some was left over</span></div>';
+      }else{
+        h+='<div class="fld"><label>Placed \u2014 what went down</label>'+
+           '<input type="number" inputmode="decimal" step="0.01" value="'+esc(AREA.endT)+'" '+
+           'placeholder="tonnes onto the road" oninput="afield(\'endT\',this.value)"></div>';
+        h+='<div id="a_left">'+leftoverHtml()+'</div>';
+        h+='<div style="text-align:center;margin:4px 0 10px"><span class="muted" '+
+           'style="text-decoration:underline" onclick="aset(\'hasLeft\',false)">'+
+           'no left over \u2014 all of it was placed</span></div>';
+      }
       h+='<div class="two">'+
          '<div class="fld"><label>Stopped at station</label>'+
          '<input type="number" inputmode="numeric" value="'+esc(AREA.endAt)+'" '+
@@ -1821,6 +1838,10 @@ function aset(k,v){
     return;
   }
   AREA[k]=v; AREA.err='';
+  if(k==='hasLeft'){
+    if(v){ if(AREA.endT==='') AREA.endT=AREA.endD; }   // start from delivered, edit down
+    else { AREA.endT=AREA.endD; }                       // closed: placed = delivered
+  }
   if(ctxDone()) AREA.showCtx=false;   // fold away once it is all chosen
   keepDraft(); openArea(AREA.code, AREA.ok);
   if(k==='date'||k==='site') loadDay();
@@ -1858,6 +1879,8 @@ function afield(k,v){
   var c=document.getElementById('a_clash'); if(c) c.innerHTML=clashHtml();
   var g=document.getElementById('a_seg');
   if(g){ var itg=byCode(AREA.code); if(itg) g.innerHTML=segRateHtml(itg); }
+  if(k==='endD' && !AREA.hasLeft) AREA.endT=AREA.endD;   // no split: placed = delivered
+  var lv=document.getElementById('a_left'); if(lv) lv.innerHTML=leftoverHtml();
   var e2=document.getElementById('a_end');
   if(e2){ var ite=byCode(AREA.code); if(ite) e2.innerHTML=endRateHtml(ite); }
   var e3=document.getElementById('a_endbtn');
@@ -2282,14 +2305,35 @@ function rateLine(prefix, station, area, tonnes, rate, designRate){
  * what tells the crew whether the tonnage they have is the tonnage they meant.
  */
 function endBtnHtml(){
-  return (AREA.endT!=='' && Number(AREA.endT)>0)
+  return (AREA.endD!=='' && Number(AREA.endD)>0)
     ? '<button class="btn save" onclick="finishDay()">Save to '+
       esc(shortDate(AREA.date))+'</button>'
     : '<button class="btn off">Save</button>';
 }
 
+/** The left over figure and a live readout, shown only when the split is open. */
+function placedNow_(){
+  // when the left-over split is open, Placed is its own field; otherwise all
+  // that was delivered was placed
+  if(AREA.hasLeft) return AREA.endT==='' ? '' : Number(AREA.endT);
+  return AREA.endD==='' ? '' : Number(AREA.endD);
+}
+
+function leftoverHtml(){
+  var d=Number(AREA.endD), pl=Number(AREA.endT);
+  if(!(d>0) || AREA.endT==='') return '<div class="note">Enter what was placed; '+
+    'the left over is worked out from it.</div>';
+  var left=Math.round((d-pl)*100)/100;
+  if(pl>d) return '<div class="note" style="background:#fdecea;color:var(--red)">'+
+    'Placed is more than delivered. Check the figures.</div>';
+  return '<div class="calc"><div class="lab">Left over (delivered \u2212 placed)</div>'+
+    '<div class="val">'+left.toLocaleString(undefined,{maximumFractionDigits:2})+
+    '<small> t</small></div></div>';
+}
+
 function endRateHtml(it){
-  var t=Number(AREA.endT);
+  // the rate is worked on what was PLACED; with no split that equals delivered
+  var t=Number(placedNow_());
   if(!(t>0)) return '';
   var sp=settlePreview();
   var area=sp.area;
@@ -2315,16 +2359,26 @@ function endRateHtml(it){
 /** Spelled out in full, because closing the day rewrites saved measurements. */
 function confirmHtml(it){
   var sp=settlePreview();
-  var t=Number(AREA.endT)||0;
+  var delivered=Number(AREA.endD)||0;
+  var t=(AREA.hasLeft ? Number(AREA.endT) : delivered)||0;   // placed drives the rate
+  var left=Math.round((delivered-t)*100)/100;
   var rate=(it.rated && sp.area>0 && t>0) ? t*1000/sp.area : null;
   var pct=(rate && DATA.designRate) ? rate/DATA.designRate : null;
   var lines=[];
   lines.push('<b>'+esc(ctxLine())+'</b>');
   if(AREA.endAt!=='') lines.push('Stopped at <b>'+esc(staTxt(Number(AREA.endAt)))+
     '</b>, width <b>'+Number(AREA.endW).toFixed(2)+' m</b>');
-  lines.push('Tonnage <b>'+t.toLocaleString(undefined,{maximumFractionDigits:2})+' t</b>'+
-    (AREA.closed!==null ? ' <span style="color:var(--red)">(replaces '+
-      Number(AREA.closed).toLocaleString()+' t)</span>' : ''));
+  if(AREA.hasLeft && left>0){
+    lines.push('Delivered <b>'+delivered.toLocaleString(undefined,{maximumFractionDigits:2})+' t</b>');
+    lines.push('Placed <b>'+t.toLocaleString(undefined,{maximumFractionDigits:2})+' t</b>'+
+      (AREA.closed!==null ? ' <span style="color:var(--red)">(replaces '+
+        Number(AREA.closed).toLocaleString()+' t)</span>' : ''));
+    lines.push('Left over <b>'+left.toLocaleString(undefined,{maximumFractionDigits:2})+' t</b>');
+  } else {
+    lines.push('Tonnage <b>'+t.toLocaleString(undefined,{maximumFractionDigits:2})+' t</b>'+
+      (AREA.closed!==null ? ' <span style="color:var(--red)">(replaces '+
+        Number(AREA.closed).toLocaleString()+' t)</span>' : ''));
+  }
   if(sp.added) lines.push('<span style="color:var(--amber)">Adds '+
     Math.round(sp.addedLen).toLocaleString()+' m to the cut-off, '+
     Math.round(sp.gainedArea).toLocaleString()+' m²</span>');
@@ -2402,8 +2456,15 @@ function finishDay(){
   if(!(AREA.dayArea>0)){
     AREA.err='No area has been measured for this day yet. Measure and save first.';
     AREA.confirming=false; openArea(AREA.code, AREA.ok); return; }
-  if(AREA.endT===''||!(Number(AREA.endT)>0)){
-    AREA.err='Enter the total tonnage for the day.';
+  if(AREA.endD===''||!(Number(AREA.endD)>0)){
+    AREA.err='Enter the delivered tonnage for the day.';
+    openArea(AREA.code, AREA.ok); return; }
+  var placedV = AREA.hasLeft ? Number(AREA.endT) : Number(AREA.endD);
+  if(AREA.hasLeft && (AREA.endT===''||!(placedV>0))){
+    AREA.err='Enter what was placed, or switch off the left-over split.';
+    openArea(AREA.code, AREA.ok); return; }
+  if(placedV > Number(AREA.endD)+0.005){
+    AREA.err='Placed cannot be more than delivered.';
     openArea(AREA.code, AREA.ok); return; }
   if(AREA.endAt!=='' && (AREA.endW===''||!(Number(AREA.endW)>0))){
     AREA.err='Enter the width at the station where they stopped.';
@@ -2426,7 +2487,8 @@ function finishDay(){
           if(DATA.items[i].code===AREA.code){ DATA.items[i]=res.item; break; }
       }
       AREA.dayArea=res.dayArea||0; AREA.dayTonnes=res.tonnes||0;
-      AREA.endT=''; AREA.endAt=''; AREA.endW=''; AREA.err=''; AREA.confirming=false;
+      AREA.endT=''; AREA.endD=''; AREA.hasLeft=false; AREA.endAt=''; AREA.endW='';
+      AREA.err=''; AREA.confirming=false;
       AREA.closed=res.tonnes; AREA.closedArea=res.dayArea||0;
       openArea(AREA.code, msg);
       loadDay();
@@ -2438,7 +2500,9 @@ function finishDay(){
     })
     .postDayTonnage({code_:CODE, code:AREA.code, date:AREA.date, site:AREA.site,
                      dir:AREA.dir, lane:AREA.lane, at:AREA.endAt, width:AREA.endW,
-                     tonnes:AREA.endT});
+                     delivered:AREA.endD,
+                     placed:(AREA.hasLeft ? AREA.endT : AREA.endD),
+                     tonnes:(AREA.hasLeft ? AREA.endT : AREA.endD)});
 }
 
 function recordEstimate(){
