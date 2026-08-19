@@ -262,7 +262,7 @@ function newRunner(){
   ['getProgress','daySoFar','photoCount','photosFor','deletePhoto',
    'postEntry','postMeasurement','postDayTonnage','postEstimate','postPhoto',
    'postTruck','trucksToday','editEntry','coverage',
-   'tackForDay','postTack','saveDayDetails','dayDetails','forecastBase'].forEach(function(name){
+   'tackForDay','postTack','saveDayDetails','dayDetails','forecastBase','millingPreview','fillMilling'].forEach(function(name){
     r[name] = function(){
       var args = Array.prototype.slice.call(arguments);
       var payload = (args.length===1 && args[0] && typeof args[0]==='object')
@@ -1220,6 +1220,88 @@ function sendTruck(data){
     .postTruck(payload);
 }
 
+/* --------------------------------------------------------- milling from paving
+   On Job B and C the milled area equals the paved area, so milling is filled
+   from the day's Top Lift rather than measured again. The guy finalises the
+   paving, comes here, previews what will be written (one line per lane with its
+   average width, irregular areas as their own lines, one total), and confirms. */
+
+function millFillHtml(it){
+  var h='<div class="note" style="margin-bottom:12px">Milling here is filled from '+
+        'today\u2019s paving \u2014 the milled area is the paved area. Finalise the '+
+        'paving first, then preview and save.</div>';
+
+  if(!MILL || MILL.for!==AREA.date+'|'+AREA.site){
+    // nothing previewed yet
+    h+='<button class="btn go" onclick="millPreview()">Preview from today\u2019s paving</button>';
+    return h;
+  }
+  if(MILL.err){
+    h+='<div class="err">'+esc(MILL.err)+'</div>';
+    h+='<button class="btn" onclick="millPreview()">Try again</button>';
+    return h;
+  }
+  if(MILL.loading){
+    h+='<div class="center" style="padding:16px 0"><div class="spin"></div>Reading the paving\u2026</div>';
+    return h;
+  }
+  // show the preview
+  var p=MILL.data;
+  h+='<div class="grp" style="margin-bottom:6px">From '+esc(p.topName)+'</div>';
+  p.lanes.forEach(function(l){
+    h+='<div class="segrow"><div class="segmain">'+
+       '<b>'+esc(staTxt(l.from))+' \u2192 '+esc(staTxt(l.to))+'</b>'+
+       '<div class="muted">'+esc(l.dir)+' '+esc(l.lane)+' \u00b7 '+
+       l.width.toFixed(2)+' m avg \u00b7 '+Math.round(l.length).toLocaleString()+' m</div></div>'+
+       '<div class="segarea">'+l.area.toLocaleString(undefined,{maximumFractionDigits:1})+' m\u00b2</div></div>';
+  });
+  p.irregular.forEach(function(r){
+    h+='<div class="segrow"><div class="segmain"><b>'+esc(r.note)+'</b>'+
+       '<div class="muted">area only</div></div>'+
+       '<div class="segarea">'+Number(r.area).toLocaleString(undefined,{maximumFractionDigits:1})+' m\u00b2</div></div>';
+  });
+  h+='<div class="grp" style="margin-top:8px">Total '+
+     p.total.toLocaleString(undefined,{maximumFractionDigits:1})+' m\u00b2 \u2014 matches the paving</div>';
+
+  if(MILL.saving){
+    h+='<button class="btn off">Saving\u2026</button>';
+  }else{
+    h+='<button class="btn save" onclick="millSave()">Save milling to '+esc(shortDate(AREA.date))+'</button>';
+  }
+  return h;
+}
+
+var MILL = null;
+
+function millPreview(){
+  MILL={for:AREA.date+'|'+AREA.site, loading:true, err:'', data:null, saving:false};
+  openArea(AREA.code);
+  google.script.run.withSuccessHandler(function(res){
+    if(!MILL) return;
+    MILL.loading=false;
+    if(!res || !res.ok){ MILL.err=(res&&res.message)||'Could not read the paving.'; }
+    else MILL.data=res;
+    openArea(AREA.code);
+  }).withFailureHandler(function(){
+    if(!MILL) return; MILL.loading=false; MILL.err='No signal. Try again.'; openArea(AREA.code);
+  }).millingPreview({code:AREA.code, date:AREA.date, site:AREA.site, code_:CODE});
+}
+
+function millSave(){
+  if(!MILL || !MILL.data) return;
+  MILL.saving=true; openArea(AREA.code);
+  google.script.run.withSuccessHandler(function(res){
+    if(!MILL) return;
+    MILL.saving=false;
+    if(!res || !res.ok){ MILL.err=(res&&res.message)||'Could not save.'; openArea(AREA.code); return; }
+    MILL=null;
+    openArea(AREA.code, res.message || 'Milling saved.');
+    loadDay();
+  }).withFailureHandler(function(){
+    if(!MILL) return; MILL.saving=false; MILL.err='No signal. Try again.'; openArea(AREA.code);
+  }).fillMilling({code:AREA.code, date:AREA.date, site:AREA.site, code_:CODE});
+}
+
 /* ----------------------------------------------------------- forecast modal
    The superintendent's question, answered from the current lane's blocks: from
    the last station, how much tonnage reaches a station, or what station a
@@ -1752,6 +1834,9 @@ function openArea(code, keepMsg){
 
   if(!ready()){
     /* the header already says what is missing */
+  }else if(it.fillsFromPaving){
+    // milling on B/C is filled from the day's paving, not measured by hand
+    h+=millFillHtml(it);
   }else if(AREA.mode==='desc'){
     h+='<div class="fld"><label>Area (m²)</label>'+
        '<input type="number" inputmode="decimal" step="0.1" value="'+esc(AREA.darea)+'" '+
