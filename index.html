@@ -1804,8 +1804,9 @@ function openArea(code, keepMsg){
          'style="text-decoration:underline" onclick="aset(\'twoW\',false)">'+
          'same width throughout</span></div>';
     }else{
+      // keep this short enough to sit on one line, level with "To station"
       var fromLabel = (AREA.anchored || AREA.segs.length)
-        ? 'From station \u00b7 continuing' : 'From station';
+        ? 'From (continuing)' : 'From station';
       h+='<div class="two">'+
          '<div class="fld"><label>'+fromLabel+'</label>'+
          '<input type="number" inputmode="numeric" id="g_s1" value="'+esc(AREA.s1)+'" '+
