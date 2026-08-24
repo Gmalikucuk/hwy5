@@ -2443,8 +2443,14 @@ function outHtml(it){
   var h = '<div class="out">'+
     '<div class="b"><div class="l">Area</div><div class="v">'+
       (est.area?Math.round(est.area).toLocaleString():'—')+'<small>m²</small></div></div>'+
+    '<div class="b"><div class="l">Avg width</div><div class="v">'+
+      (est.avgWidth?est.avgWidth.toFixed(2):'—')+'<small>m</small></div></div>'+
     '<div class="b"><div class="l">Tonnes</div><div class="v">'+
-      (est.tonnes?Math.round(est.tonnes).toLocaleString():'—')+'</div></div>';
+      (est.tonnes?Math.round(est.tonnes).toLocaleString():'—')+'</div></div>'+
+    (it.rated
+      ? '<div class="b"><div class="l">100% tonnes</div><div class="v">'+
+        (est.tonnes100?Math.round(est.tonnes100).toLocaleString():'—')+'</div></div>'
+      : '');
   if(it.rated){
     h += '<div class="b"><div class="l">Rate</div><div class="v '+est.cls+'">'+
          (est.rate?est.rate.toFixed(1):'—')+'<small>kg/m²</small></div></div>';
@@ -2510,7 +2516,19 @@ function estimate(it){
   var pct = (rate && DATA.designRate) ? rate/DATA.designRate : null;
   var cls = '';
   if(pct!==null) cls = (pct>=1 && pct<=(DATA.target||1.019)+0.0005) ? 'good' : 'warn';
-  return {area:Math.round(area*100)/100, tonnes:tonnes, rate:rate, pct:pct, cls:cls};
+
+  // average width = area over the stationed length; the tonnage the same area
+  // would take at 100% of design = area x design / 1000
+  var totLen = 0;
+  segs.forEach(function(g){
+    if(g.kind==='sta'){ totLen += Math.abs(Number(g.s2)-Number(g.s1)); }
+  });
+  var avgWidth = totLen>0 ? area/totLen : null;
+  var tonnes100 = (it.rated && DATA.designRate && area>0)
+    ? area*DATA.designRate/1000 : null;
+
+  return {area:Math.round(area*100)/100, tonnes:tonnes, rate:rate, pct:pct, cls:cls,
+          avgWidth:avgWidth, tonnes100:tonnes100};
 }
 
 /** 10:45 am */
