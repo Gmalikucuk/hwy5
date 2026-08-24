@@ -6,7 +6,7 @@
  * and phones will happily run last week's app for ever, which is the classic
  * way this goes wrong.
  */
-var VERSION = 'hwy5-2026-08-15-k';
+var VERSION = 'hwy5-2026-08-24-edit-saved-seg';
 var SHELL = ['/', '/index.html', '/manifest.json', '/icon180.png', '/icon512.png'];
 
 self.addEventListener('install', function (e) {

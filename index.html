@@ -261,7 +261,7 @@ function newRunner(){
      screen waits for an answer that is not coming. */
   ['getProgress','daySoFar','photoCount','photosFor','deletePhoto',
    'postEntry','postMeasurement','postDayTonnage','postEstimate','postPhoto',
-   'postTruck','trucksToday','editEntry','coverage',
+   'postTruck','trucksToday','editEntry','editSavedSeg','coverage',
    'tackForDay','postTack','saveDayDetails','dayDetails','forecastBase','millingPreview','fillMilling'].forEach(function(name){
     r[name] = function(){
       var args = Array.prototype.slice.call(arguments);
@@ -1797,6 +1797,7 @@ function openArea(code, keepMsg){
     AREA = d
       ? {code:code, date:d.date, site:d.site, dir:d.dir, lane:d.lane||'',
          segs:d.segs||[], mode:'sta', twoW:!!d.twoW, anchored:!!d.anchored, confirmDrop:-1,
+         confirmDropSaved:-1, editSaved:-1, editW1:'', editW2:'', savedMsg:'',
          s1:d.s1||'', w1:d.w1||'', s2:'', w2:d.w2||'',
          darea:'', dnote:'', tonnes:d.tonnes||'', at:'', atw:'',
          endT:'', endD:'', hasLeft:false,
@@ -1804,6 +1805,7 @@ function openArea(code, keepMsg){
       : {code:code, date:'',
          site:(it.sites&&it.sites.length===1)?it.sites[0]:'',
          dir:'', lane:'', segs:[], mode:'sta', twoW:false, anchored:false, confirmDrop:-1,
+         confirmDropSaved:-1, editSaved:-1, editW1:'', editW2:'', savedMsg:'',
          s1:'', w1:'', s2:'', w2:'', darea:'', dnote:'',
          tonnes:'', segT:'', lift:'', at:'', atw:'', confirming:false,
          endT:'', endD:'', hasLeft:false, endAt:'', endW:'', closed:null, closedArea:0,
@@ -1939,20 +1941,50 @@ function openArea(code, keepMsg){
     h+='<div class="grp" style="margin-top:16px">Today so far</div>';
     h+='<div class="pts">';
     // newest at the top: the last thing done is the first thing you want to see
-    AREA.daySegs.slice().reverse().forEach(function(g){
-      h+='<div class="pt" style="opacity:.72">'+
-         '<div class="txt" style="flex:1;min-width:0">'+
+    // (index carried so a correction targets the right saved stretch)
+    var _ds=AREA.daySegs;
+    for(var di=_ds.length-1;di>=0;di--){
+      (function(g,idx){
+      var confirming=(AREA.confirmDropSaved===idx);
+      var canFix=(g.kind!=='desc');   // only stationed stretches can be corrected here
+      h+='<div class="pt">'+
+         '<div class="txt" style="flex:1;min-width:0"'+
+         (canFix?' onclick="editSavedRow('+idx+')"':'')+'>'+
          (g.kind==='desc'
            ? '<div style="font-weight:600">Area without stations</div>'
            : '<div style="font-weight:600">'+esc(staTxt(g.s1))+' → '+esc(staTxt(g.s2))+'</div>'+
              '<div style="font-size:12px;color:var(--grey)">'+esc(g.dir||'')+
              (g.lane?' · '+esc(g.lane):'')+' · '+Number(g.w1).toFixed(2)+
-             (g.w2!==g.w1?' / '+Number(g.w2).toFixed(2):'')+' m</div>')+
+             (g.w2!==g.w1?' / '+Number(g.w2).toFixed(2):'')+' m'+
+             (canFix?' · tap to change':'')+'</div>')+
          '</div>'+
          '<div class="a">'+Number(g.area).toLocaleString(undefined,{maximumFractionDigits:1})+
-         ' m²</div></div>';
-    });
+         ' m²</div>'+
+         (canFix
+           ? (confirming
+               ? '<div class="x" style="color:var(--red);font-weight:700;font-size:13px" '+
+                 'onclick="removeSavedRow('+idx+')">remove?</div>'
+               : '<div class="x" onclick="askRemoveSaved('+idx+')">&times;</div>')
+           : '')+
+         '</div>';
+      // inline edit row for a saved stretch
+      if(AREA.editSaved===idx && canFix){
+        h+='<div class="pt" style="flex-direction:column;align-items:stretch;gap:8px">'+
+           '<div class="two">'+
+           '<div class="fld"><label>Width there (m)</label>'+
+           '<input type="number" inputmode="decimal" step="0.01" value="'+esc(AREA.editW1)+'" '+
+           'oninput="AREA.editW1=this.value"></div>'+
+           '<div class="fld"><label>Width there (m)</label>'+
+           '<input type="number" inputmode="decimal" step="0.01" value="'+esc(AREA.editW2)+'" '+
+           'oninput="AREA.editW2=this.value"></div></div>'+
+           '<button class="btn save" onclick="saveSavedRow('+idx+')">Change it</button>'+
+           '<button class="btn ghost" onclick="AREA.editSaved=-1;openArea(AREA.code)">Cancel</button>'+
+           '</div>';
+      }
+      })(_ds[di],di);
+    }
     h+='</div>';
+    if(AREA.savedMsg) h+='<div class="note" style="margin-top:6px">'+esc(AREA.savedMsg)+'</div>';
   }
 
   if(AREA.segs.length){
@@ -3033,6 +3065,106 @@ function editSeg(i){
   AREA.segs.splice(i,1);
   AREA.anchored=true;   // editing implies the run has begun
   AREA.err=''; keepDraft(); openArea(AREA.code, 'Correcting a stretch \u2014 change it and save again.');
+}
+
+/* ---- Correcting a SAVED stretch (already in the archive) --------------
+   The staged list above corrects unsaved stretches. These correct ones
+   already saved, by calling editSavedSeg on the server, which edits the
+   Log and rebuilds the day. A day already reported is refused server-side. */
+
+// which saved stretch AREA.daySegs[idx] maps to — carried straight through.
+function savedSegAt_(idx){ return (AREA.daySegs||[])[idx]; }
+
+function askRemoveSaved(idx){
+  AREA.confirmDropSaved=idx; AREA.editSaved=-1; openArea(AREA.code, AREA.ok);
+}
+
+function removeSavedRow(idx){
+  var g=savedSegAt_(idx);
+  AREA.confirmDropSaved=-1;
+  if(!g || g.kind==='desc'){ openArea(AREA.code, AREA.ok); return; }
+  var payload={ code_:CODE, code:AREA.code, date:AREA.date, site:AREA.site,
+                dir:g.dir||'', lane:g.lane||'',
+                s1:g.s1, s2:g.s2, w1:g.w1, w2:g.w2, remove:true };
+  AREA.savedMsg='Removing that stretch\u2026'; openArea(AREA.code, AREA.ok);
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!AREA) return;
+      if(!res || !res.ok){ AREA.savedMsg=''; AREA.err=(res&&res.message)||'Could not remove it.';
+        openArea(AREA.code); return; }
+      AREA.savedMsg=''; AREA.err='';
+      if(res.segs){ AREA.daySegs=res.segs; }
+      applyFreshItem_(res.item);
+      openArea(AREA.code, 'Stretch removed.');
+      aReloadDay();
+    })
+    .withFailureHandler(function(){
+      if(!AREA) return;
+      AREA.savedMsg=''; AREA.err='No signal. The stretch was not removed \u2014 try again on signal.';
+      openArea(AREA.code);
+    })
+    .editSavedSeg(payload);
+}
+
+function editSavedRow(idx){
+  var g=savedSegAt_(idx);
+  if(!g || g.kind==='desc') return;
+  AREA.confirmDropSaved=-1;
+  AREA.editSaved=idx;
+  AREA.editW1=String(g.w1); AREA.editW2=String(g.w2);
+  openArea(AREA.code, AREA.ok);
+}
+
+function saveSavedRow(idx){
+  var g=savedSegAt_(idx);
+  if(!g || g.kind==='desc'){ AREA.editSaved=-1; openArea(AREA.code); return; }
+  var w1=Number(AREA.editW1), w2=Number(AREA.editW2);
+  if(!(w1>0) || !(w2>0)){ AREA.err='Enter a width.'; openArea(AREA.code); return; }
+  var payload={ code_:CODE, code:AREA.code, date:AREA.date, site:AREA.site,
+                dir:g.dir||'', lane:g.lane||'',
+                s1:g.s1, s2:g.s2, w1:g.w1, w2:g.w2,
+                newW1:w1, newW2:w2 };
+  AREA.savedMsg='Saving the change\u2026'; openArea(AREA.code, AREA.ok);
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!AREA) return;
+      if(!res || !res.ok){ AREA.savedMsg=''; AREA.err=(res&&res.message)||'Could not change it.';
+        openArea(AREA.code); return; }
+      AREA.savedMsg=''; AREA.err=''; AREA.editSaved=-1;
+      if(res.segs){ AREA.daySegs=res.segs; }
+      applyFreshItem_(res.item);
+      openArea(AREA.code, 'Stretch changed.');
+      aReloadDay();
+    })
+    .withFailureHandler(function(){
+      if(!AREA) return;
+      AREA.savedMsg=''; AREA.err='No signal. The change was not saved \u2014 try again on signal.';
+      openArea(AREA.code);
+    })
+    .editSavedSeg(payload);
+}
+
+// refresh the day's figures/segs from the server after a saved-stretch change
+function aReloadDay(){
+  var it=byCode(AREA.code);
+  if(!it||it.entry!=='area') return;
+  var code=AREA.code, d=AREA.date, st=AREA.site;
+  google.script.run.withSuccessHandler(function(res){
+    if(!AREA||AREA.code!==code||AREA.date!==d||AREA.site!==st) return;
+    if(!res||!res.ok) return;
+    AREA.dayArea=res.area||0; AREA.dayTonnes=res.tonnes||0; AREA.daySegs=res.segs||[];
+    AREA.closed=(res.closed===null||res.closed===undefined)?null:res.closed;
+    AREA.closedArea=AREA.dayArea;
+    openArea(code, AREA.ok);
+  }).withFailureHandler(function(){}).daySoFar(code,d,st,CODE);
+}
+
+// update the item card in DATA.items after a correction, so % complete is fresh
+function applyFreshItem_(item){
+  if(!item || item.code!==AREA.code) return;
+  for(var i=0;i<DATA.items.length;i++){
+    if(DATA.items[i].code===AREA.code){ DATA.items[i]=item; break; }
+  }
 }
 
 function submitArea(){
