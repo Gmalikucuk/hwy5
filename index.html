@@ -2479,11 +2479,11 @@ function estimate(it){
     }));
   var at = (AREA.at===''||AREA.at===null||!isFinite(Number(AREA.at))) ? null : Number(AREA.at);
 
-  var area = 0, cur = [];
+  var area = 0, staLen = 0, cur = [];
   segs.forEach(function(g){
-    if(g.kind!=='sta'){ area += g.area; return; }
+    if(g.kind!=='sta'){ area += g.area; return; }   // no station length for irregular areas
     if(at!==null && g.dir===AREA.dir && g.lane===AREA.lane) cur.push(g);
-    else area += g.area;
+    else { area += g.area; staLen += Math.abs(Number(g.s2)-Number(g.s1)); }
   });
 
   if(at!==null && cur.length){
@@ -2492,12 +2492,13 @@ function estimate(it){
       var g=cur[i], lo=Math.min(g.s1,g.s2), hi=Math.max(g.s1,g.s2);
       var past = rising ? (at>=hi) : (at<=lo);
       var before = rising ? (at<=lo) : (at>=hi);
-      if(past){ area += g.area; }
+      if(past){ area += g.area; staLen += (hi-lo); }
       else if(before){ /* not reached */ }
       else {
         var done = rising ? (at-lo) : (hi-at);
         var full = hi-lo;
         area += full>0 ? g.area*(done/full) : 0;   // part way through
+        staLen += full>0 ? Math.max(0, done) : 0;  // length must match the area's partial
       }
     }
     var last = cur[cur.length-1];
@@ -2508,6 +2509,7 @@ function estimate(it){
       var w = (AREA.atw!==''&&isFinite(Number(AREA.atw))&&Number(AREA.atw)>0)
         ? Number(AREA.atw) : last.w2;
       area += Math.abs(at-end)*(last.w2+w)/2;
+      staLen += Math.abs(at-end);
     }
   }
 
@@ -2517,13 +2519,10 @@ function estimate(it){
   var cls = '';
   if(pct!==null) cls = (pct>=1 && pct<=(DATA.target||1.019)+0.0005) ? 'good' : 'warn';
 
-  // average width = area over the stationed length; the tonnage the same area
-  // would take at 100% of design = area x design / 1000
-  var totLen = 0;
-  segs.forEach(function(g){
-    if(g.kind==='sta'){ totLen += Math.abs(Number(g.s2)-Number(g.s1)); }
-  });
-  var avgWidth = totLen>0 ? area/totLen : null;
+  // average width = area over the stationed length that produced it. staLen is
+  // accumulated in step with area above, so an "at station" partial divides the
+  // partial area by the partial length — not the full run (which read too low).
+  var avgWidth = staLen>0 ? area/staLen : null;
   var tonnes100 = (it.rated && DATA.designRate && area>0)
     ? area*DATA.designRate/1000 : null;
 
