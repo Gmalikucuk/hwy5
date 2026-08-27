@@ -229,7 +229,7 @@
   </div>
   <div class="act" id="act"></div>
 </header>
-<input type="file" id="camIn" accept="image/*" capture="environment"
+<input type="file" id="camIn" accept="image/*"
        style="display:none" onchange="photoPicked(this)">
 <div id="qbar"></div>
 
@@ -268,8 +268,6 @@ function newRunner(){
       var payload = (args.length===1 && args[0] && typeof args[0]==='object')
         ? args[0] : shape(name, args);
       if(payload.code_===undefined) payload.code_ = CODE;
-      // a write that could be retried gets a one-time id, so a lost reply
-      // cannot make the server write it twice. Set once; a resend keeps it.
       var WRITES = {postEntry:1, postMeasurement:1, postDayTonnage:1,
                     postTruck:1, postTack:1};
       if(WRITES[name] && !payload.saveId) payload.saveId = newSaveId();
@@ -321,8 +319,6 @@ var KEY = 'hwy5.pins.v1';
 var CKEY = 'hwy5.code.v1';
 var QKEY = 'hwy5.queue.v1';
 
-// A one-time id for each save, so a save whose reply was lost can be resent
-// without the server writing it twice. Stamped when the payload is built.
 function newSaveId(){
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
@@ -2481,7 +2477,7 @@ function estimate(it){
 
   var area = 0, staLen = 0, cur = [];
   segs.forEach(function(g){
-    if(g.kind!=='sta'){ area += g.area; return; }   // no station length for irregular areas
+    if(g.kind!=='sta'){ area += g.area; return; }
     if(at!==null && g.dir===AREA.dir && g.lane===AREA.lane) cur.push(g);
     else { area += g.area; staLen += Math.abs(Number(g.s2)-Number(g.s1)); }
   });
@@ -2498,14 +2494,13 @@ function estimate(it){
         var done = rising ? (at-lo) : (hi-at);
         var full = hi-lo;
         area += full>0 ? g.area*(done/full) : 0;   // part way through
-        staLen += full>0 ? Math.max(0, done) : 0;  // length must match the area's partial
+        staLen += full>0 ? Math.max(0, done) : 0;
       }
     }
     var last = cur[cur.length-1];
     var end = last.s2;
     var beyond = rising ? (at>end) : (at<end);
     if(beyond){
-      // carried on past the last measurement, at the width given
       var w = (AREA.atw!==''&&isFinite(Number(AREA.atw))&&Number(AREA.atw)>0)
         ? Number(AREA.atw) : last.w2;
       area += Math.abs(at-end)*(last.w2+w)/2;
@@ -2518,14 +2513,9 @@ function estimate(it){
   var pct = (rate && DATA.designRate) ? rate/DATA.designRate : null;
   var cls = '';
   if(pct!==null) cls = (pct>=1 && pct<=(DATA.target||1.019)+0.0005) ? 'good' : 'warn';
-
-  // average width = area over the stationed length that produced it. staLen is
-  // accumulated in step with area above, so an "at station" partial divides the
-  // partial area by the partial length — not the full run (which read too low).
   var avgWidth = staLen>0 ? area/staLen : null;
   var tonnes100 = (it.rated && DATA.designRate && area>0)
     ? area*DATA.designRate/1000 : null;
-
   return {area:Math.round(area*100)/100, tonnes:tonnes, rate:rate, pct:pct, cls:cls,
           avgWidth:avgWidth, tonnes100:tonnes100};
 }
