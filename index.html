@@ -732,6 +732,12 @@ function openEntry(code, keepMsg){
     h+='<div class="fld"><label>Note (optional)</label>'+
        '<input type="text" id="f_loc" value="'+esc(FORM.loc)+'" '+
        'placeholder="side, anything worth saying" oninput="fset(\'loc\',this.value)"></div>';
+    if(it.code==='04.07.02'){
+      h+='<div class="fld"><label>Tonnes consumed (optional)</label>'+
+         '<input type="number" inputmode="decimal" step="0.01" id="f_ton" '+
+         'value="'+esc(FORM.tonnes||'')+'" placeholder="0.00" '+
+         'oninput="fset(\'tonnes\',this.value)"></div>';
+    }
   }else if(it.entry==='point'){
     // one station marks the spot; the quantity is measured on the ground
     h+='<div class="fld"><label>At station</label>'+
@@ -1063,7 +1069,7 @@ function submitEntry(){
       // the day, the place and the direction carry over: the next entry is
       // almost always the same day at the same site
       FORM.qty=''; FORM.from=''; FORM.to=''; FORM.at='';
-      FORM.loc=''; FORM.cuts=[]; FORM.way='';
+      FORM.loc=''; FORM.cuts=[]; FORM.way=''; FORM.tonnes='';
       FORM.err=''; FORM.ok=saved; FORM.tag='';
       SHOTS.key='';
       openEntry(code, saved);
@@ -1072,12 +1078,12 @@ function submitEntry(){
     .withFailureHandler(function(){
       enqueue('postEntry', epayload, it.name+' \u2014 '+(FORM.qty||'entry'));
       FORM.qty=''; FORM.from=''; FORM.to=''; FORM.at='';
-      FORM.loc=''; FORM.cuts=[]; FORM.way=''; FORM.err='';
+      FORM.loc=''; FORM.cuts=[]; FORM.way=''; FORM.tonnes=''; FORM.err='';
       openEntry(FORM.code, 'Held on this phone \u2014 it will be sent when there is signal.');
     })
     .postEntry(epayload={code_:CODE, code:FORM.code, date:FORM.date, site:FORM.site, dir:FORM.dir,
                 lane:FORM.lane, way:FORM.way, fac:FORM.fac, at:FORM.at, cuts:FORM.cuts,
-                from:FORM.from, to:FORM.to, qty:FORM.qty, loc:FORM.loc});
+                from:FORM.from, to:FORM.to, qty:FORM.qty, loc:FORM.loc, tonnes:FORM.tonnes});
 }
 
 /* ------------------------------------------------------- area measuring */
